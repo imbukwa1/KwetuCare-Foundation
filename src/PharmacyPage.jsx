@@ -99,7 +99,7 @@ function PharmacyModal({ isOpen, patient, onClose, onSubmit }) {
   const [statusMap, setStatusMap] = useState({});
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const prescriptionList = patient ? patient.prescriptions || [] : [];
+  const prescriptionList = useMemo(() => (patient ? patient.prescriptions || [] : []), [patient]);
 
   const allAssigned = useMemo(() => {
     if (!patient) return false;

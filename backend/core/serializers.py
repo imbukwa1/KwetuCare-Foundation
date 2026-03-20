@@ -1,6 +1,11 @@
+from django.conf import settings
+from django.contrib.auth import authenticate
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 from django.db.models import Count
 from django.utils import timezone
+from django.utils.text import slugify
+import re
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -9,6 +14,18 @@ from django.db import transaction
 from .models import AuditLog, Consultation, DrugInventory, Patient, Prescription, Triage
 
 User = get_user_model()
+
+
+def build_unique_username(full_name):
+    base_username = slugify(full_name).replace("-", "_") or "user"
+    username = base_username
+    suffix = 1
+
+    while User.objects.filter(username=username).exists():
+        suffix += 1
+        username = f"{base_username}_{suffix}"
+
+    return username
 
 
 def create_audit_log(*, user, action, patient=None, details=None):
@@ -20,29 +37,80 @@ def create_audit_log(*, user, action, patient=None, details=None):
     )
 
 
-class SignupSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=8)
+def generate_patient_reg_no():
+    current_year = timezone.now().year
+    prefix = f"KCF-{current_year}-"
+    latest_patient = (
+        Patient.objects.filter(reg_no__startswith=prefix)
+        .order_by("-reg_no")
+        .first()
+    )
 
-    class Meta:
-        model = User
-        fields = ("id", "username", "email", "password", "role")
+    next_number = 1
+    if latest_patient:
+        try:
+            next_number = int(latest_patient.reg_no.rsplit("-", 1)[-1]) + 1
+        except (TypeError, ValueError):
+            next_number = 1
+
+    return f"{prefix}{next_number:04d}"
+
+
+class SignupSerializer(serializers.Serializer):
+    password = serializers.CharField(write_only=True, min_length=8)
+    full_name = serializers.CharField(write_only=True, max_length=150)
+    role = serializers.ChoiceField(choices=User.Role.choices)
+    email = serializers.EmailField()
+
+    def validate_full_name(self, value):
+        normalized_value = " ".join(value.split()).strip()
+        if not normalized_value:
+            raise serializers.ValidationError("Full name is required.")
+        return normalized_value
+
+    def validate_email(self, value):
+        normalized_value = value.strip().lower()
+        if User.objects.filter(email__iexact=normalized_value).exists():
+            raise serializers.ValidationError("An account with this email already exists.")
+        return normalized_value
 
     def create(self, validated_data):
+        full_name = validated_data.pop("full_name")
         password = validated_data.pop("password")
-        user = User(**validated_data)
-        user.is_approved = False
+        name_parts = full_name.split(" ", 1)
+        user = User(
+            username=build_unique_username(full_name),
+            first_name=name_parts[0],
+            last_name=name_parts[1] if len(name_parts) > 1 else "",
+            **validated_data,
+        )
+        user.is_approved = settings.BYPASS_USER_APPROVAL
         user.set_password(password)
         user.save()
         return user
 
 
 class UserSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+    is_approved = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ("id", "username", "email", "role", "is_approved")
+        fields = ("id", "username", "full_name", "email", "role", "is_approved")
+
+    def get_full_name(self, obj):
+        full_name = obj.get_full_name().strip()
+        return full_name or obj.username
+
+    def get_is_approved(self, obj):
+        return True if settings.BYPASS_USER_APPROVAL else obj.is_approved
 
 
 class LoginSerializer(TokenObtainPairSerializer):
+    default_error_messages = {
+        "no_active_account": "Invalid email/username or password.",
+    }
+
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
@@ -51,12 +119,40 @@ class LoginSerializer(TokenObtainPairSerializer):
         return token
 
     def validate(self, attrs):
-        data = super().validate(attrs)
+        identifier = attrs.get(self.username_field, "").strip()
+        password = attrs.get("password")
+
+        lookup_value = identifier
+        if "@" in identifier:
+            try:
+                lookup_value = User.objects.get(email__iexact=identifier).username
+            except User.DoesNotExist:
+                self.fail("no_active_account")
+
+        authenticate_kwargs = {
+            self.username_field: lookup_value,
+            "password": password,
+        }
+        request = self.context.get("request")
+        if request is not None:
+            authenticate_kwargs["request"] = request
+
+        self.user = authenticate(**authenticate_kwargs)
+        if not self.user:
+            self.fail("no_active_account")
+
+        refresh = self.get_token(self.user)
+        data = {
+            "refresh": str(refresh),
+            "access": str(refresh.access_token),
+        }
         data["user"] = UserSerializer(self.user).data
         return data
 
 
 class PatientRegistrationSerializer(serializers.ModelSerializer):
+    reg_no = serializers.CharField(read_only=True)
+
     class Meta:
         model = Patient
         fields = (
@@ -68,31 +164,75 @@ class PatientRegistrationSerializer(serializers.ModelSerializer):
             "camp",
             "village",
             "next_of_kin",
+            "has_child",
+            "child_name",
+            "child_age",
+            "child_date_of_birth",
+            "guardian_name",
             "reg_no",
             "priority",
             "status",
             "created_at",
         )
-        read_only_fields = ("id", "status", "created_at")
+        read_only_fields = ("id", "reg_no", "status", "created_at")
 
     def validate_age(self, value):
         if value < 0 or value > 120:
             raise serializers.ValidationError("Age must be between 0 and 120.")
         return value
 
-    def validate_reg_no(self, value):
-        normalized_value = value.strip()
-        if not normalized_value:
-            raise serializers.ValidationError("Registration number is required.")
+    def validate_child_age(self, value):
+        if value is not None and (value < 0 or value > 120):
+            raise serializers.ValidationError("Child age must be between 0 and 120.")
+        return value
 
-        if Patient.objects.filter(reg_no__iexact=normalized_value).exists():
-            raise serializers.ValidationError("A patient with this registration number already exists.")
+    def validate(self, attrs):
+        has_child = attrs.get("has_child", False)
 
-        return normalized_value
+        if has_child:
+            child_name = (attrs.get("child_name") or "").strip()
+            guardian_name = (attrs.get("guardian_name") or "").strip()
+            child_age = attrs.get("child_age")
+            child_date_of_birth = attrs.get("child_date_of_birth")
+
+            errors = {}
+            if not child_name:
+                errors["child_name"] = "Child name is required when a child is present."
+            if child_age in (None, ""):
+                errors["child_age"] = "Child age is required when a child is present."
+            if not child_date_of_birth:
+                errors["child_date_of_birth"] = "Child date of birth is required when a child is present."
+            if not guardian_name:
+                errors["guardian_name"] = "Guardian name is required when a child is present."
+
+            if errors:
+                raise serializers.ValidationError(errors)
+
+            attrs["child_name"] = child_name
+            attrs["guardian_name"] = guardian_name
+        else:
+            attrs["child_name"] = ""
+            attrs["child_age"] = None
+            attrs["child_date_of_birth"] = None
+            attrs["guardian_name"] = ""
+
+        return attrs
 
     def create(self, validated_data):
         validated_data["status"] = Patient.Status.TRIAGE
-        patient = super().create(validated_data)
+
+        for _ in range(5):
+            validated_data["reg_no"] = generate_patient_reg_no()
+            try:
+                patient = super().create(validated_data)
+                break
+            except IntegrityError:
+                continue
+        else:
+            raise serializers.ValidationError(
+                "Could not generate a unique registration number. Please try again."
+            )
+
         create_audit_log(
             user=self.context["request"].user,
             action="patient_registered",
@@ -111,6 +251,7 @@ class TriageSerializer(serializers.ModelSerializer):
             "id",
             "patient_id",
             "patient",
+            "blood_pressure",
             "temperature",
             "weight",
             "heart_rate",
@@ -123,6 +264,12 @@ class TriageSerializer(serializers.ModelSerializer):
         if value < 30 or value > 45:
             raise serializers.ValidationError("Temperature must be between 30.0 and 45.0 Celsius.")
         return value
+
+    def validate_blood_pressure(self, value):
+        normalized_value = value.strip()
+        if not re.fullmatch(r"\d{2,3}/\d{2,3}", normalized_value):
+            raise serializers.ValidationError("Blood pressure must be in the format systolic/diastolic, e.g. 120/80.")
+        return normalized_value
 
     def validate_weight(self, value):
         if value <= 0 or value > 500:
@@ -176,6 +323,7 @@ class TriageSerializer(serializers.ModelSerializer):
                 action="triage_completed",
                 patient=patient,
                 details={
+                    "blood_pressure": triage.blood_pressure,
                     "temperature": str(triage.temperature),
                     "weight": str(triage.weight),
                     "heart_rate": triage.heart_rate,
@@ -455,6 +603,10 @@ class InventoryAdjustSerializer(serializers.Serializer):
 
 
 class PatientListSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
+    age = serializers.SerializerMethodField()
+    guardian_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Patient
         fields = (
@@ -466,10 +618,27 @@ class PatientListSerializer(serializers.ModelSerializer):
             "phone",
             "camp",
             "village",
+            "has_child",
+            "guardian_name",
             "priority",
             "status",
             "created_at",
         )
+
+    def get_name(self, obj):
+        if obj.has_child and obj.child_name:
+            return obj.child_name
+        return obj.name
+
+    def get_age(self, obj):
+        if obj.has_child and obj.child_age is not None:
+            return obj.child_age
+        return obj.age
+
+    def get_guardian_name(self, obj):
+        if obj.has_child:
+            return obj.guardian_name or obj.name
+        return ""
 
 
 class PrescriptionDetailSerializer(serializers.ModelSerializer):
@@ -478,8 +647,25 @@ class PrescriptionDetailSerializer(serializers.ModelSerializer):
         fields = ("id", "drug_name", "dosage", "quantity", "frequency", "status")
 
 
+class TriageDetailSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Triage
+        fields = (
+            "blood_pressure",
+            "temperature",
+            "weight",
+            "heart_rate",
+            "nurse_notes",
+            "created_at",
+        )
+
+
 class PatientWorkflowDetailSerializer(serializers.ModelSerializer):
     prescriptions = serializers.SerializerMethodField()
+    name = serializers.SerializerMethodField()
+    guardian_name = serializers.SerializerMethodField()
+    age = serializers.SerializerMethodField()
+    triage = serializers.SerializerMethodField()
 
     class Meta:
         model = Patient
@@ -487,11 +673,35 @@ class PatientWorkflowDetailSerializer(serializers.ModelSerializer):
             "id",
             "reg_no",
             "name",
+            "age",
             "camp",
+            "has_child",
+            "guardian_name",
             "priority",
             "status",
+            "triage",
             "prescriptions",
         )
+
+    def get_name(self, obj):
+        if obj.has_child and obj.child_name:
+            return obj.child_name
+        return obj.name
+
+    def get_age(self, obj):
+        if obj.has_child and obj.child_age is not None:
+            return obj.child_age
+        return obj.age
+
+    def get_guardian_name(self, obj):
+        if obj.has_child:
+            return obj.guardian_name or obj.name
+        return ""
+
+    def get_triage(self, obj):
+        if not hasattr(obj, "triage"):
+            return None
+        return TriageDetailSerializer(obj.triage).data
 
     def get_prescriptions(self, obj):
         if not hasattr(obj, "consultation"):

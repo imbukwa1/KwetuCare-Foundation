@@ -55,12 +55,17 @@ function PatientList({ patients, onStart }) {
 }
 
 function TriageModal({ isOpen, patient, onClose, onSubmit }) {
-  const [form, setForm] = useState({ heartRate: "", temperature: "", weight: "", notes: "" });
+  const [form, setForm] = useState({ bloodPressure: "", heartRate: "", temperature: "", weight: "", notes: "" });
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isFormValid = useMemo(() => {
-    return form.heartRate.trim() !== "" && form.temperature.trim() !== "" && form.weight.trim() !== "";
+    return (
+      form.bloodPressure.trim() !== "" &&
+      form.heartRate.trim() !== "" &&
+      form.temperature.trim() !== "" &&
+      form.weight.trim() !== ""
+    );
   }, [form]);
 
   const handleField = (field) => (event) => {
@@ -80,6 +85,7 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
     Promise.resolve(
       onSubmit({
         patient,
+        bloodPressure: form.bloodPressure.trim(),
         heartRate: Number(form.heartRate),
         temperature: Number(form.temperature),
         weight: Number(form.weight),
@@ -87,7 +93,7 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
       })
     )
       .then(() => {
-        setForm({ heartRate: "", temperature: "", weight: "", notes: "" });
+        setForm({ bloodPressure: "", heartRate: "", temperature: "", weight: "", notes: "" });
       })
       .catch((submitError) => {
         setError(submitError.message);
@@ -107,6 +113,15 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
           </button>
         </div>
         <form onSubmit={submit} className="modal-form">
+          <label>
+            Blood Pressure *
+            <input
+              type="text"
+              value={form.bloodPressure}
+              onChange={handleField("bloodPressure")}
+              placeholder="e.g. 120/80"
+            />
+          </label>
           <label>
             Heart Rate (bpm) *
             <input type="number" value={form.heartRate} onChange={handleField("heartRate")} placeholder="e.g. 82" />
@@ -176,6 +191,7 @@ export default function TriagePage({ currentUser, onLogout }) {
   const handleSubmit = async (triageData) => {
     await submitTriage({
       patient_id: triageData.patient.id,
+      blood_pressure: triageData.bloodPressure,
       temperature: triageData.temperature,
       weight: triageData.weight,
       heart_rate: triageData.heartRate,

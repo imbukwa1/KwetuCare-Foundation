@@ -1,5 +1,5 @@
 const API_BASE_URL =
-  process.env.REACT_APP_API_BASE_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000/api";
+  process.env.REACT_APP_API_BASE_URL?.replace(/\/$/, "") || "/api";
 
 const ACCESS_TOKEN_KEY = "kwetu_access_token";
 const REFRESH_TOKEN_KEY = "kwetu_refresh_token";
@@ -37,8 +37,11 @@ async function parseResponse(response) {
       typeof data === "string"
         ? data
         : data.detail ||
-          Object.values(data)
-            .flat()
+          Object.entries(data)
+            .map(([key, value]) => {
+              const text = Array.isArray(value) ? value.join(" ") : String(value);
+              return `${key}: ${text}`;
+            })
             .join(" ") ||
           "Request failed.";
     throw new Error(message);

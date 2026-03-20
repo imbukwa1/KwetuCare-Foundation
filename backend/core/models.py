@@ -36,6 +36,11 @@ class Patient(models.Model):
     camp = models.CharField(max_length=255)
     village = models.CharField(max_length=255)
     next_of_kin = models.CharField(max_length=255)
+    has_child = models.BooleanField(default=False)
+    child_name = models.CharField(max_length=255, blank=True)
+    child_age = models.PositiveIntegerField(null=True, blank=True)
+    child_date_of_birth = models.DateField(null=True, blank=True)
+    guardian_name = models.CharField(max_length=255, blank=True)
     reg_no = models.CharField(max_length=100, unique=True)
     priority = models.CharField(
         max_length=20,
@@ -63,6 +68,7 @@ class Triage(models.Model):
         on_delete=models.CASCADE,
         related_name="triage",
     )
+    blood_pressure = models.CharField(max_length=20)
     temperature = models.DecimalField(max_digits=4, decimal_places=1)
     weight = models.DecimalField(max_digits=5, decimal_places=2)
     heart_rate = models.PositiveIntegerField()

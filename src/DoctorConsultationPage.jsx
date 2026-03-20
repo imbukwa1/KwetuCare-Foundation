@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import logo from "./kcf logo.jpeg";
 import "./DoctorConsultationPage.css";
-import { fetchQueue, submitConsultation } from "./api";
+import { fetchPatientDetail, fetchQueue, submitConsultation } from "./api";
 
 function Header({ doctorName, onLogout }) {
   return (
@@ -155,8 +155,42 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
                 Priority
                 <input value={patient.priority} readOnly />
               </label>
+              {patient.guardian_name && (
+                <label>
+                  Guardian
+                  <input value={patient.guardian_name} readOnly />
+                </label>
+              )}
             </div>
           </div>
+
+          {patient.triage && (
+            <div className="doc-section">
+              <h4>Nurse Triage Notes</h4>
+              <div className="doc-info-grid">
+                <label>
+                  Blood Pressure
+                  <input value={patient.triage.blood_pressure || ""} readOnly />
+                </label>
+                <label>
+                  Heart Rate
+                  <input value={patient.triage.heart_rate || ""} readOnly />
+                </label>
+                <label>
+                  Temperature
+                  <input value={patient.triage.temperature || ""} readOnly />
+                </label>
+                <label>
+                  Weight
+                  <input value={patient.triage.weight || ""} readOnly />
+                </label>
+              </div>
+              <label>
+                Nurse Notes
+                <textarea value={patient.triage.nurse_notes || ""} rows={3} readOnly />
+              </label>
+            </div>
+          )}
 
           <div className="doc-section">
             <h4>Doctor Notes *</h4>
@@ -234,6 +268,7 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
     async function loadQueue() {
@@ -252,9 +287,18 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
     loadQueue();
   }, []);
 
-  const startConsultation = (patient) => {
-    setSelectedPatient(patient);
-    setModalOpen(true);
+  const startConsultation = async (patient) => {
+    setPageError("");
+    setDetailLoading(true);
+    try {
+      const detail = await fetchPatientDetail(patient.id);
+      setSelectedPatient(detail);
+      setModalOpen(true);
+    } catch (error) {
+      setPageError(error.message);
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
   const closeModal = () => {
@@ -280,6 +324,7 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
         <Header doctorName={currentUser ? currentUser.username : "Doctor"} onLogout={onLogout} />
         {successMessage && <p className="doc-status-success">{successMessage}</p>}
         {pageError && <p className="doc-error">{pageError}</p>}
+        {detailLoading && <p className="doc-status-box">Loading patient triage details...</p>}
         {loading ? <p className="doc-status-box">Loading doctor queue...</p> : <PatientList patients={patients} onStart={startConsultation} />}
         <ConsultationModal isOpen={modalOpen} patient={selectedPatient} onClose={closeModal} onSubmit={handleSubmit} />
       </div>

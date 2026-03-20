@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import "./PatientIntakeForm.css";
 import { createPatient } from "./api";
 
+const REQUIRED_FIELDS = ["name", "age", "gender", "phone", "camp", "village", "nextOfKin"];
+
 export default function PatientIntakeForm({ currentUser, onLogout }) {
   const [form, setForm] = useState({
     name: "",
@@ -11,7 +13,11 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
     camp: "",
     village: "",
     nextOfKin: "",
-    regNo: "",
+    hasChild: false,
+    childName: "",
+    childAge: "",
+    childDateOfBirth: "",
+    guardianName: "",
     priority: "normal",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -23,11 +29,20 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const required = ["name", "age", "gender", "phone", "camp", "village", "nextOfKin", "regNo"];
-
   const allRequiredFilled = useMemo(() => {
-    return required.every((k) => form[k].toString().trim() !== "");
-  }, [form, required]);
+    const baseFieldsFilled = REQUIRED_FIELDS.every((k) => form[k].toString().trim() !== "");
+    if (!form.hasChild) {
+      return baseFieldsFilled;
+    }
+
+    return (
+      baseFieldsFilled &&
+      form.childName.trim() !== "" &&
+      form.childAge.toString().trim() !== "" &&
+      form.childDateOfBirth.trim() !== "" &&
+      form.guardianName.trim() !== ""
+    );
+  }, [form]);
 
   const isValidForm = allRequiredFilled;
 
@@ -47,11 +62,15 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
       camp: form.camp,
       village: form.village,
       next_of_kin: form.nextOfKin,
-      reg_no: form.regNo,
+      has_child: form.hasChild,
+      child_name: form.hasChild ? form.childName : "",
+      child_age: form.hasChild ? Number(form.childAge) : null,
+      child_date_of_birth: form.hasChild ? form.childDateOfBirth : null,
+      guardian_name: form.hasChild ? form.guardianName : "",
       priority: form.priority,
     })
       .then((patient) => {
-        setMessage(`Registration complete for ${patient.name}. Queued for triage.`);
+        setMessage(`Registration complete for ${patient.name}. Reg No: ${patient.reg_no}. Queued for triage.`);
         setForm({
           name: "",
           age: "",
@@ -60,7 +79,11 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
           camp: "",
           village: "",
           nextOfKin: "",
-          regNo: "",
+          hasChild: false,
+          childName: "",
+          childAge: "",
+          childDateOfBirth: "",
+          guardianName: "",
           priority: "normal",
         });
       })
@@ -76,7 +99,7 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
         <header className="kcf-header">
           <div className="kcf-meta-like">
             <span className="kcf-meta">Kwetu Care Facility (KCF) {currentUser ? `- ${currentUser.username}` : ""}</span>
-            <span className="kcf-reg">Reg No: {form.regNo || "____"}</span>
+            <span className="kcf-reg">Reg No appears after registration</span>
           </div>
           <h1>Patient Intake Form</h1>
           {onLogout && (
@@ -132,11 +155,78 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
             </label>
           </div>
 
-          <div className="kcf-row">
-            <label>
-              Registration Number <span>*</span>
-              <input value={form.regNo} onChange={handleChange("regNo")} type="text" placeholder="e.g. KCF-001" required />
+          <div className="kcf-row-inline">
+            <label className="kcf-checkbox">
+              <input
+                checked={form.hasChild}
+                onChange={(event) => {
+                  const checked = event.target.checked;
+                  setForm((prev) => ({
+                    ...prev,
+                    hasChild: checked,
+                    childName: checked ? prev.childName : "",
+                    childAge: checked ? prev.childAge : "",
+                    childDateOfBirth: checked ? prev.childDateOfBirth : "",
+                    guardianName: checked ? prev.guardianName : "",
+                  }));
+                }}
+                type="checkbox"
+              />
+              Child present
             </label>
+          </div>
+
+          {form.hasChild && (
+            <div className="kcf-child-card">
+              <h3>Child Details</h3>
+              <div className="kcf-row">
+                <label>
+                  Child Name <span>*</span>
+                  <input
+                    value={form.childName}
+                    onChange={handleChange("childName")}
+                    type="text"
+                    placeholder="Child full name"
+                    required
+                  />
+                </label>
+                <label>
+                  Child Age <span>*</span>
+                  <input
+                    value={form.childAge}
+                    onChange={handleChange("childAge")}
+                    type="number"
+                    min="0"
+                    placeholder="Child age"
+                    required
+                  />
+                </label>
+              </div>
+              <div className="kcf-row">
+                <label>
+                  Date of Birth <span>*</span>
+                  <input
+                    value={form.childDateOfBirth}
+                    onChange={handleChange("childDateOfBirth")}
+                    type="date"
+                    required
+                  />
+                </label>
+                <label>
+                  Guardian Name <span>*</span>
+                  <input
+                    value={form.guardianName}
+                    onChange={handleChange("guardianName")}
+                    type="text"
+                    placeholder="Guardian name"
+                    required
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+
+          <div className="kcf-row">
             <label>
               Priority
               <select value={form.priority} onChange={handleChange("priority")}>
@@ -145,6 +235,8 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
               </select>
             </label>
           </div>
+
+          <p className="modal-subtitle">Registration number will be generated automatically after saving.</p>
 
           {message && <p className="kcf-success">{message}</p>}
           {error && <p className="modal-error">{error}</p>}

@@ -87,6 +87,9 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
+# Local testing helper: when True, signup auto-approves users and approval checks are bypassed.
+BYPASS_USER_APPROVAL = os.getenv('BYPASS_USER_APPROVAL', 'true').lower() == 'true'
+
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
