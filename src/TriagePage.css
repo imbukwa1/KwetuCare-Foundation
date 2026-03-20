@@ -1,0 +1,264 @@
+:root {
+  --maroon: #7b192f;
+  --maroon-dark: #5f1425;
+  --cream: #fff6eb;
+  --lightbrown: #e9d5c2;
+  --brown-border: #d0b2a1;
+  --text: #2b2b2b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  background-color: var(--cream);
+  color: var(--text);
+}
+
+.triage-page {
+  min-height: 100vh;
+  background-color: var(--cream);
+  padding: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.triage-container {
+  width: min(100%, 1020px);
+  background: white;
+  border-radius: 18px;
+  box-shadow: 0 14px 30px rgba(33, 21, 13, 0.16);
+  border: 1px solid #f0e4d3;
+  padding: 1rem 1.2rem 1.2rem;
+}
+
+.triage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.2rem;
+  border-bottom: 1px solid var(--lightbrown);
+  padding-bottom: 0.8rem;
+}
+
+.site-logo {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.triage-header h1 {
+  margin: 0;
+  color: var(--maroon);
+  font-size: clamp(1.4rem, 2vw, 1.8rem);
+}
+
+.triage-profile {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+}
+
+.triage-profile span {
+  font-weight: 600;
+  color: #5e3d36;
+  background: #f8ece4;
+  padding: 0.4rem 0.7rem;
+  border-radius: 7px;
+  border: 1px solid var(--lightbrown);
+}
+
+.triage-logout,
+.btn-primary,
+.btn-muted {
+  border: 0;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.6rem 1rem;
+}
+
+.triage-logout,
+.btn-primary {
+  background: var(--maroon);
+  color: #fff;
+}
+
+.triage-logout:hover,
+.btn-primary:hover {
+  background: var(--maroon-dark);
+}
+
+.btn-muted {
+  background: #f3e2d5;
+  color: #5d3f36;
+  border: 1px solid var(--lightbrown);
+}
+
+.btn-muted:hover {
+  background: #efd7c4;
+}
+
+.patient-list h2 {
+  margin: 0 0 0.8rem;
+  font-size: 1.2rem;
+  color: #6d3f34;
+}
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.95rem;
+}
+
+.patient-card {
+  background: #fff;
+  border: 1px solid var(--lightbrown);
+  border-radius: 12px;
+  box-shadow: 0 8px 18px rgba(106, 76, 63, 0.12);
+  padding: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.patient-card-urgent {
+  border-color: #c23b22;
+  box-shadow: 0 10px 22px rgba(194, 59, 34, 0.18);
+}
+
+.patient-card h3 {
+  margin: 0 0 0.1rem;
+  color: #532f2a;
+  font-size: 1rem;
+}
+
+.patient-card p {
+  margin: 0;
+  color: #76594f;
+  font-size: 0.88rem;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(21, 17, 12, 0.50);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  animation: fadeIn 0.25s ease;
+}
+
+.modal-content {
+  background: var(--cream);
+  border: 1px solid var(--brown-border);
+  border-radius: 14px;
+  width: min(100%, 480px);
+  margin: 1rem;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.2);
+  animation: slideIn 0.24s ease;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid var(--lightbrown);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--maroon);
+}
+
+.close-btn {
+  border: none;
+  background: transparent;
+  color: #3d1c1f;
+  font-size: 1.35rem;
+  cursor: pointer;
+}
+
+.modal-form {
+  padding: 0.9rem 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.modal-form label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.95rem;
+  color: #522f2a;
+}
+
+.modal-form input,
+.modal-form textarea {
+  margin-top: 0.35rem;
+  border: 1px solid #d6bda9;
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.95rem;
+}
+
+.modal-form input:focus,
+.modal-form textarea:focus {
+  outline: 2px solid rgba(123, 25, 47, 0.2);
+  border-color: var(--maroon);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+}
+
+.modal-error {
+  color: #8b1e2f;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.queue-empty,
+.queue-success {
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+}
+
+.queue-empty {
+  background: #f8ece4;
+  color: #6a4a3f;
+}
+
+.queue-success {
+  background: #e6f4ea;
+  color: #1f6b3d;
+  border: 1px solid #b8ddc2;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideIn {
+  from { transform: translateY(-14px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@media (max-width: 900px) {
+  .triage-container {
+    padding: 0.8rem;
+  }
+}
