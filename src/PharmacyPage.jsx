@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import logo from "./kcf logo.jpeg";
 import "./PharmacyPage.css";
 import { fetchPatientDetail, fetchQueue, submitDispensing } from "./api";
+import useHybridDataSync from "./useHybridDataSync";
 
 function Header({ pharmacistName, onLogout }) {
   return (
@@ -172,24 +173,37 @@ export default function PharmacyPage({ currentUser, onLogout }) {
   const [pageError, setPageError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  useEffect(() => {
-    async function loadQueue() {
+  const loadQueue = useCallback(async ({ showLoading = false } = {}) => {
+    if (showLoading) {
       setLoading(true);
-      setPageError("");
-      try {
-        const queue = await fetchQueue();
-        setPatients(queue);
-      } catch (error) {
-        setPageError(error.message);
-      } finally {
-        setLoading(false);
-      }
     }
-
-    loadQueue();
+    const queue = await fetchQueue();
+    return queue;
   }, []);
 
-  const openModal = async (patient) => {
+  const { lastUpdated, refresh } = useHybridDataSync({
+    fetcher: loadQueue,
+    onData: (queue, { showLoading }) => {
+      setPatients(queue);
+      setPageError("");
+      if (showLoading) {
+        setLoading(false);
+      }
+    },
+    onError: (error, { showLoading }) => {
+      setPageError(error.message);
+      if (showLoading) {
+        setLoading(false);
+      }
+    },
+    relevantEventTypes: ["consultation_completed", "prescription_updated", "drug_dispensed"],
+  });
+
+  useEffect(() => {
+    refresh({ showLoading: true, source: "initial" }).catch(() => {});
+  }, [refresh]);
+
+  const openModal = useCallback(async (patient) => {
     setPageError("");
     try {
       const detail = await fetchPatientDetail(patient.id);
@@ -198,23 +212,23 @@ export default function PharmacyPage({ currentUser, onLogout }) {
     } catch (error) {
       setPageError(error.message);
     }
-  };
+  }, []);
 
-  const closeModal = () => {
+  const closeModal = useCallback(() => {
     setIsModalOpen(false);
     setSelected(null);
-  };
+  }, []);
 
-  const handleSubmit = async (patient, dispensingData) => {
+  const handleSubmit = useCallback(async (patient, dispensingData) => {
     await submitDispensing({
       patient_id: patient.id,
       prescriptions: dispensingData,
     });
 
-    setPatients((prev) => prev.filter((item) => item.id !== patient.id));
     setSuccessMessage(`Dispensing finalized for ${patient.name}.`);
     closeModal();
-  };
+    await refresh({ source: "after-dispense" });
+  }, [closeModal, refresh]);
 
   return (
     <div className="pharm-page">
@@ -222,6 +236,7 @@ export default function PharmacyPage({ currentUser, onLogout }) {
         <Header pharmacistName={currentUser ? currentUser.username : "Pharmacist"} onLogout={onLogout} />
         {successMessage && <p className="pharm-status-success">{successMessage}</p>}
         {pageError && <p className="pharm-error">{pageError}</p>}
+        {lastUpdated && <p className="pharm-status-box">Last updated: {lastUpdated.toLocaleTimeString()}</p>}
         {loading ? <p className="pharm-status-box">Loading pharmacy queue...</p> : <PatientList patients={patients} onGiveDrugs={openModal} />}
         <PharmacyModal isOpen={isModalOpen} patient={selected} onClose={closeModal} onSubmit={handleSubmit} />
       </div>

@@ -41,26 +41,62 @@ body {
   margin-bottom: 1rem;
   padding-bottom: 1rem;
 }
-.kcf-meta-like {
+
+.kcf-header-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.65rem;
+}
+
+.kcf-logo {
+  font-weight: 700;
+  color: var(--kcf-maroon);
+  background: #f7e9e2;
+  padding: 0.45rem 0.8rem;
+  border-radius: 9px;
+  border: 1px solid var(--kcf-lightbrown);
+}
+
+.site-logo {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.kcf-header-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1;
   font-size: 0.87rem;
   color: #826659;
-  margin-bottom: 0.35rem;
 }
+
 .kcf-meta {
   font-weight: 600;
-}
-.kcf-reg {
-  background: var(--kcf-lightbrown);
-  border-radius: 999px;
-  padding: 0.2rem 0.75rem;
 }
 .kcf-header h1 {
   margin: 0;
   font-size: clamp(1.45rem, 2vw, 1.95rem);
   color: var(--kcf-maroon);
+}
+
+.kcf-logout-button {
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.65rem 1rem;
+  background: var(--kcf-maroon);
+  color: #fff;
+  transition: all 0.18s ease;
+}
+
+.kcf-logout-button:hover {
+  background: #5f1425;
 }
 
 .kcf-form {
@@ -167,6 +203,10 @@ body {
 @media (max-width: 780px) {
   .kcf-card {
     padding: 1rem;
+  }
+  .kcf-header-top {
+    flex-direction: column;
+    align-items: stretch;
   }
   .kcf-row {
     grid-template-columns: 1fr;

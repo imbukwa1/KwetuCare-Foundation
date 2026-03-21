@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import logo from "./kcf logo.jpeg";
 import "./DoctorConsultationPage.css";
 import { fetchPatientDetail, fetchQueue, submitConsultation } from "./api";
+import useHybridDataSync from "./useHybridDataSync";
 
 function Header({ doctorName, onLogout }) {
   return (
@@ -106,8 +107,8 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
         patient,
         doctorNotes,
         prescriptions: prescriptions.map((item) => ({
-          drug_name: item.drugName,
-          dosage: item.dosage,
+          drug_name: item.drugName.trim(),
+          dosage: item.dosage.trim(),
           quantity: Number(item.quantity),
           frequency: item.frequency,
           status: item.status,
@@ -270,24 +271,37 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
   const [successMessage, setSuccessMessage] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
 
-  useEffect(() => {
-    async function loadQueue() {
+  const loadQueue = useCallback(async ({ showLoading = false } = {}) => {
+    if (showLoading) {
       setLoading(true);
-      setPageError("");
-      try {
-        const queue = await fetchQueue();
-        setPatients(queue);
-      } catch (error) {
-        setPageError(error.message);
-      } finally {
-        setLoading(false);
-      }
     }
-
-    loadQueue();
+    const queue = await fetchQueue();
+    return queue;
   }, []);
 
-  const startConsultation = async (patient) => {
+  const { lastUpdated, refresh } = useHybridDataSync({
+    fetcher: loadQueue,
+    onData: (queue, { showLoading }) => {
+      setPatients(queue);
+      setPageError("");
+      if (showLoading) {
+        setLoading(false);
+      }
+    },
+    onError: (error, { showLoading }) => {
+      setPageError(error.message);
+      if (showLoading) {
+        setLoading(false);
+      }
+    },
+    relevantEventTypes: ["triage_completed", "consultation_completed"],
+  });
+
+  useEffect(() => {
+    refresh({ showLoading: true, source: "initial" }).catch(() => {});
+  }, [refresh]);
+
+  const startConsultation = useCallback(async (patient) => {
     setPageError("");
     setDetailLoading(true);
     try {
@@ -299,24 +313,24 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
     } finally {
       setDetailLoading(false);
     }
-  };
+  }, []);
 
-  const closeModal = () => {
+  const closeModal = useCallback(() => {
     setModalOpen(false);
     setSelectedPatient(null);
-  };
+  }, []);
 
-  const handleSubmit = async (data) => {
+  const handleSubmit = useCallback(async (data) => {
     await submitConsultation({
       patient_id: data.patient.id,
       doctor_notes: data.doctorNotes,
       prescriptions: data.prescriptions,
     });
 
-    setPatients((prev) => prev.filter((patient) => patient.id !== data.patient.id));
     setSuccessMessage(`Consultation submitted for ${data.patient.name}.`);
     closeModal();
-  };
+    await refresh({ source: "after-consultation" });
+  }, [closeModal, refresh]);
 
   return (
     <div className="doc-page">
@@ -324,6 +338,7 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
         <Header doctorName={currentUser ? currentUser.username : "Doctor"} onLogout={onLogout} />
         {successMessage && <p className="doc-status-success">{successMessage}</p>}
         {pageError && <p className="doc-error">{pageError}</p>}
+        {lastUpdated && <p className="doc-status-box">Last updated: {lastUpdated.toLocaleTimeString()}</p>}
         {detailLoading && <p className="doc-status-box">Loading patient triage details...</p>}
         {loading ? <p className="doc-status-box">Loading doctor queue...</p> : <PatientList patients={patients} onStart={startConsultation} />}
         <ConsultationModal isOpen={modalOpen} patient={selectedPatient} onClose={closeModal} onSubmit={handleSubmit} />

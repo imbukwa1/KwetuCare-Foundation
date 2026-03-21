@@ -121,3 +121,22 @@ class IsAdminOrPharmacistUser(BasePermission):
             and request.user.is_approved
             and request.user.role in {"admin", "pharmacist"}
         )
+
+
+class IsInventoryViewer(BasePermission):
+    message = "Only approved admins, doctors, or pharmacists can view inventory."
+
+    def has_permission(self, request, view):
+        allowed_roles = {"admin", "doctor", "pharmacist"}
+        if settings.BYPASS_USER_APPROVAL:
+            return bool(
+                request.user
+                and request.user.is_authenticated
+                and request.user.role in allowed_roles
+            )
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_approved
+            and request.user.role in allowed_roles
+        )

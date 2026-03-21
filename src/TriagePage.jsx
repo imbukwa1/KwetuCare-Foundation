@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import logo from "./kcf logo.jpeg";
 import "./TriagePage.css";
 import { fetchQueue, submitTriage } from "./api";
+import useHybridDataSync from "./useHybridDataSync";
 
 function Header({ nurseName, onLogout }) {
   return (
@@ -161,34 +162,48 @@ export default function TriagePage({ currentUser, onLogout }) {
   const [pageError, setPageError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  useEffect(() => {
-    async function loadQueue() {
+  const loadQueue = useCallback(async ({ showLoading = false } = {}) => {
+    if (showLoading) {
       setLoading(true);
-      setPageError("");
-      try {
-        const queue = await fetchQueue();
-        setPatients(queue);
-      } catch (error) {
-        setPageError(error.message);
-      } finally {
-        setLoading(false);
-      }
     }
-
-    loadQueue();
+    const queue = await fetchQueue();
+    return queue;
   }, []);
 
-  const openTriage = (patient) => {
+  const { lastUpdated, refresh } = useHybridDataSync({
+    fetcher: loadQueue,
+    onData: (queue, { showLoading }) => {
+      setPatients(queue);
+      if (showLoading) {
+        setLoading(false);
+      }
+    },
+    onError: (error, { showLoading }) => {
+      setPageError(error.message);
+      if (showLoading) {
+        setLoading(false);
+      }
+    },
+    relevantEventTypes: ["patient_created", "triage_completed"],
+  });
+
+  useEffect(() => {
+    refresh({ showLoading: true, source: "initial" }).catch(() => {});
+  }, [refresh]);
+
+  const openTriage = useCallback((patient) => {
     setSelectedPatient(patient);
     setModalOpen(true);
-  };
+    setPageError("");
+  }, []);
 
-  const closeTriage = () => {
+  const closeTriage = useCallback(() => {
     setModalOpen(false);
     setSelectedPatient(null);
-  };
+  }, []);
 
-  const handleSubmit = async (triageData) => {
+  const handleSubmit = useCallback(async (triageData) => {
+    setPageError("");
     await submitTriage({
       patient_id: triageData.patient.id,
       blood_pressure: triageData.bloodPressure,
@@ -198,10 +213,10 @@ export default function TriagePage({ currentUser, onLogout }) {
       nurse_notes: triageData.notes,
     });
 
-    setPatients((prev) => prev.filter((patient) => patient.id !== triageData.patient.id));
     setSuccessMessage(`Triage data saved for ${triageData.patient.name}.`);
     closeTriage();
-  };
+    await refresh({ source: "after-triage" });
+  }, [closeTriage, refresh]);
 
   return (
     <div className="triage-page">
@@ -209,6 +224,7 @@ export default function TriagePage({ currentUser, onLogout }) {
         <Header nurseName={currentUser ? currentUser.username : "Triage Nurse"} onLogout={onLogout} />
         {successMessage && <p className="queue-success">{successMessage}</p>}
         {pageError && <p className="modal-error">{pageError}</p>}
+        {lastUpdated && <p className="queue-empty">Last updated: {lastUpdated.toLocaleTimeString()}</p>}
         {loading ? <p className="queue-empty">Loading triage queue...</p> : <PatientList patients={patients} onStart={openTriage} />}
 
         <TriageModal isOpen={modalOpen} patient={selectedPatient} onClose={closeTriage} onSubmit={handleSubmit} />

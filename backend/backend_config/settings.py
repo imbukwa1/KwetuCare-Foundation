@@ -50,6 +50,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'backend_config.wsgi.application'
+ASGI_APPLICATION = 'backend_config.asgi.application'
 
 DATABASES = {
     'default': {

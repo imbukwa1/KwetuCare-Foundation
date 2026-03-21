@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import "./PatientIntakeForm.css";
 import { createPatient } from "./api";
+import logo from "./kcf logo.jpeg";
 
 const REQUIRED_FIELDS = ["name", "age", "gender", "phone", "camp", "village", "nextOfKin"];
 
@@ -97,16 +98,20 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
     <div className="kcf-page">
       <div className="kcf-card">
         <header className="kcf-header">
-          <div className="kcf-meta-like">
-            <span className="kcf-meta">Kwetu Care Facility (KCF) {currentUser ? `- ${currentUser.username}` : ""}</span>
-            <span className="kcf-reg">Reg No appears after registration</span>
+          <div className="kcf-header-top">
+            <div className="kcf-logo">
+              <img src={logo} alt="KCF logo" className="site-logo" />
+            </div>
+            <div className="kcf-header-meta">
+              <span className="kcf-meta">Kwetu Care Facility (KCF) {currentUser ? `- ${currentUser.username}` : ""}</span>
+            </div>
+            {onLogout && (
+              <button className="kcf-logout-button" type="button" onClick={onLogout}>
+                Logout
+              </button>
+            )}
           </div>
           <h1>Patient Intake Form</h1>
-          {onLogout && (
-            <button className="kcf-button" type="button" onClick={onLogout}>
-              Logout
-            </button>
-          )}
         </header>
 
         <form className="kcf-form" onSubmit={handleSubmit} noValidate>

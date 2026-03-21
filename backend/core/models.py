@@ -119,6 +119,7 @@ class Prescription(models.Model):
 
 class DrugInventory(models.Model):
     drug_name = models.CharField(max_length=255, unique=True)
+    amount = models.CharField(max_length=50)
     stock_quantity = models.PositiveIntegerField(default=0)
     reorder_level = models.PositiveIntegerField(default=10)
     updated_at = models.DateTimeField(auto_now=True)

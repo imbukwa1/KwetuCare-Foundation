@@ -163,9 +163,12 @@ body {
   border: 1px solid var(--lightbrown);
   border-radius: 14px;
   width: min(95%, 640px);
+  max-height: min(92vh, 900px);
   box-shadow: 0 16px 35px rgba(0, 0, 0, 0.24);
   animation: scaleIn 0.2s ease;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .doc-modal-header {
@@ -181,6 +184,7 @@ body {
   flex-direction: column;
   gap: 0.8rem;
   padding: 1rem;
+  overflow-y: auto;
 }
 
 .doc-modal-body h4 {

@@ -12,6 +12,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.db import transaction
 
 from .models import AuditLog, Consultation, DrugInventory, Patient, Prescription, Triage
+from .realtime import publish_audit_event
 
 User = get_user_model()
 
@@ -29,12 +30,14 @@ def build_unique_username(full_name):
 
 
 def create_audit_log(*, user, action, patient=None, details=None):
+    payload = details or {}
     AuditLog.objects.create(
         user=user if getattr(user, "is_authenticated", False) else None,
         action=action,
         patient=patient,
-        details=details or {},
+        details=payload,
     )
+    publish_audit_event(action=action, patient=patient, details=payload)
 
 
 def generate_patient_reg_no():
@@ -396,14 +399,30 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
         if not value:
             raise serializers.ValidationError("At least one prescription is required.")
 
+        inventory_by_name = {
+            item.drug_name.strip().lower(): item.drug_name
+            for item in DrugInventory.objects.all()
+        }
         seen_drugs = set()
+        normalized_items = []
         for item in value:
             drug_name = item["drug_name"].strip().lower()
             if drug_name in seen_drugs:
                 raise serializers.ValidationError("Duplicate drug names are not allowed in one consultation.")
+            canonical_name = inventory_by_name.get(drug_name)
+            if canonical_name is None:
+                raise serializers.ValidationError(
+                    f"{item['drug_name'].strip()} is not available in inventory."
+                )
             seen_drugs.add(drug_name)
+            normalized_items.append(
+                {
+                    **item,
+                    "drug_name": canonical_name,
+                }
+            )
 
-        return value
+        return normalized_items
 
     @transaction.atomic
     def create(self, validated_data):
@@ -499,10 +518,8 @@ class PharmacyDispenseSerializer(serializers.Serializer):
             for prescription in consultation.prescriptions.select_for_update()
         }
         inventory_map = {
-            item.drug_name.lower(): item
-            for item in DrugInventory.objects.select_for_update().filter(
-                drug_name__in=[prescription.drug_name for prescription in prescription_map.values()]
-            )
+            item.drug_name.strip().lower(): item
+            for item in DrugInventory.objects.select_for_update()
         }
 
         submitted_ids = set()
@@ -581,6 +598,7 @@ class DrugInventorySerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "drug_name",
+            "amount",
             "stock_quantity",
             "reorder_level",
             "is_low_stock",
@@ -595,6 +613,17 @@ class DrugInventorySerializer(serializers.ModelSerializer):
         normalized_value = value.strip()
         if not normalized_value:
             raise serializers.ValidationError("Drug name is required.")
+        queryset = DrugInventory.objects.filter(drug_name__iexact=normalized_value)
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("A drug with this name already exists.")
+        return normalized_value
+
+    def validate_amount(self, value):
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise serializers.ValidationError("Amount is required.")
         return normalized_value
 
 
@@ -726,9 +755,17 @@ class CampDrugIssuedSummarySerializer(serializers.Serializer):
         }
 
 
+class CampDrugDetailSerializer(serializers.Serializer):
+    camp = serializers.CharField()
+    drug_name = serializers.CharField()
+    amount = serializers.CharField()
+    total_quantity = serializers.IntegerField()
+
+
 class AdminReportSerializer(serializers.Serializer):
     patients_per_camp = CampPatientSummarySerializer(many=True)
     drugs_issued_per_camp = CampDrugIssuedSummarySerializer(many=True)
+    drug_details_per_camp = CampDrugDetailSerializer(many=True)
     completed_patients = serializers.IntegerField()
 
 

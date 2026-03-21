@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.db import models
-from django.db.models import Case, Count, IntegerField, Q, Value, When
+from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
 from django.http import HttpResponse
 from rest_framework.exceptions import PermissionDenied
 from rest_framework import generics, permissions, status
@@ -14,6 +14,7 @@ from .permissions import (
     IsAdminOrPharmacistUser,
     IsApprovedUser,
     IsDoctorUser,
+    IsInventoryViewer,
     IsNurseUser,
     IsPharmacistUser,
     IsRegistrationOfficer,
@@ -50,12 +51,32 @@ def build_admin_report_data():
         .annotate(total_drugs_issued=Count("id"))
         .order_by("consultation__patient__camp")
     )
+    inventory_amounts = {
+        item.drug_name.strip().lower(): item.amount
+        for item in DrugInventory.objects.all()
+    }
+    drug_details_per_camp = []
+    for item in (
+        Prescription.objects.filter(status=Prescription.Status.GIVEN)
+        .values("consultation__patient__camp", "drug_name")
+        .annotate(total_quantity=Sum("quantity"))
+        .order_by("consultation__patient__camp", "drug_name")
+    ):
+        drug_details_per_camp.append(
+            {
+                "camp": item["consultation__patient__camp"],
+                "drug_name": item["drug_name"],
+                "amount": inventory_amounts.get(item["drug_name"].strip().lower(), ""),
+                "total_quantity": item["total_quantity"] or 0,
+            }
+        )
     completed_patients = Patient.objects.filter(
         status=Patient.Status.COMPLETE
     ).count()
     return {
         "patients_per_camp": patients_per_camp,
         "drugs_issued_per_camp": drugs_issued_per_camp,
+        "drug_details_per_camp": drug_details_per_camp,
         "completed_patients": completed_patients,
     }
 
@@ -232,6 +253,13 @@ class AdminReportExportView(APIView):
             f"<tr><td>{item['consultation__patient__camp']}</td><td>{item['total_drugs_issued']}</td></tr>"
             for item in report_data["drugs_issued_per_camp"]
         )
+        detail_rows = "".join(
+            (
+                f"<tr><td>{item['camp']}</td><td>{item['drug_name']}</td>"
+                f"<td>{item['total_quantity']}</td><td>{item['amount'] or 'N/A'}</td></tr>"
+            )
+            for item in report_data["drug_details_per_camp"]
+        )
 
         html = f"""
         <html>
@@ -260,6 +288,12 @@ class AdminReportExportView(APIView):
             <table>
                 <tr><th>Camp</th><th>Total Drugs Issued</th></tr>
                 {drugs_rows}
+            </table>
+
+            <h2>Specific Drugs Given Per Camp</h2>
+            <table>
+                <tr><th>Camp</th><th>Drug</th><th>Total Quantity</th><th>Amount</th></tr>
+                {detail_rows}
             </table>
         </body>
         </html>
@@ -317,7 +351,6 @@ class AdminStageTimingView(APIView):
 
 class DrugInventoryListCreateView(generics.ListCreateAPIView):
     serializer_class = DrugInventorySerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrPharmacistUser]
 
     def get_queryset(self):
         queryset = DrugInventory.objects.all()
@@ -330,6 +363,11 @@ class DrugInventoryListCreateView(generics.ListCreateAPIView):
             queryset = queryset.filter(stock_quantity__lte=models.F("reorder_level"))
 
         return queryset
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [permissions.IsAuthenticated(), IsInventoryViewer()]
+        return [permissions.IsAuthenticated(), IsAdminOrPharmacistUser()]
 
     def perform_create(self, serializer):
         if self.request.user.role != "admin":

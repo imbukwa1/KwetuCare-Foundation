@@ -1,19 +1,19 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import logo from "./kcf logo.jpeg";
 import "./AdminDashboardPage.css";
 import {
   approveUser,
   createInventory,
+  downloadReport,
   fetchAdminPatients,
   fetchInventory,
   fetchPendingUsers,
   fetchReportSummary,
   fetchStageTiming,
-  getReportExportUrl,
-  getStoredAccessToken,
   rejectUser,
   restockInventoryItem,
 } from "./api";
+import useHybridDataSync from "./useHybridDataSync";
 
 function Header({ currentUser, onLogout, onDownloadReport }) {
   return (
@@ -186,12 +186,13 @@ function PatientSearchPanel({ patients, search, setSearch }) {
   );
 }
 
-function InventoryPanel({ inventory, form, setForm, onCreate, onRestock }) {
+function InventoryPanel({ inventory, form, setForm, restockAmounts, setRestockAmounts, onCreate, onRestock }) {
   return (
     <section className="panel">
       <div className="panel-header"><h2>Inventory</h2></div>
       <div className="inventory-form">
         <input className="admin-input" placeholder="Drug name" value={form.drug_name} onChange={(event) => setForm((prev) => ({ ...prev, drug_name: event.target.value }))} />
+        <input className="admin-input" placeholder="Amount e.g. 400g" value={form.amount} onChange={(event) => setForm((prev) => ({ ...prev, amount: event.target.value }))} />
         <input className="admin-input" placeholder="Stock quantity" type="number" min="0" value={form.stock_quantity} onChange={(event) => setForm((prev) => ({ ...prev, stock_quantity: event.target.value }))} />
         <input className="admin-input" placeholder="Reorder level" type="number" min="0" value={form.reorder_level} onChange={(event) => setForm((prev) => ({ ...prev, reorder_level: event.target.value }))} />
         <button className="btn-maroon" onClick={onCreate}>Add Drug</button>
@@ -200,6 +201,7 @@ function InventoryPanel({ inventory, form, setForm, onCreate, onRestock }) {
         <thead>
           <tr>
             <th>Drug</th>
+            <th>Amount</th>
             <th>Stock</th>
             <th>Reorder Level</th>
             <th>Low Stock</th>
@@ -210,11 +212,22 @@ function InventoryPanel({ inventory, form, setForm, onCreate, onRestock }) {
           {inventory.map((item) => (
             <tr key={item.id}>
               <td>{item.drug_name}</td>
+              <td>{item.amount}</td>
               <td>{item.stock_quantity}</td>
               <td>{item.reorder_level}</td>
               <td>{item.is_low_stock ? "Yes" : "No"}</td>
-              <td>
-                <button className="btn-muted" onClick={() => onRestock(item.id)}>+10</button>
+              <td className="action-row">
+                <input
+                  className="admin-input"
+                  type="number"
+                  min="1"
+                  placeholder="Qty"
+                  value={restockAmounts[item.id] || ""}
+                  onChange={(event) =>
+                    setRestockAmounts((prev) => ({ ...prev, [item.id]: event.target.value }))
+                  }
+                />
+                <button className="btn-muted" onClick={() => onRestock(item.id)}>Restock</button>
               </td>
             </tr>
           ))}
@@ -236,107 +249,152 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
   const [patients, setPatients] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [search, setSearch] = useState("");
-  const [inventoryForm, setInventoryForm] = useState({ drug_name: "", stock_quantity: "", reorder_level: "" });
+  const [inventoryForm, setInventoryForm] = useState({ drug_name: "", amount: "", stock_quantity: "", reorder_level: "" });
+  const [restockAmounts, setRestockAmounts] = useState({});
   const [statusMessage, setStatusMessage] = useState("");
   const [error, setError] = useState("");
-
-  async function loadDashboard(searchQuery = "") {
-    setError("");
-    try {
-      const [pending, reportSummary, stageTiming, patientList, inventoryList] = await Promise.all([
-        fetchPendingUsers(),
-        fetchReportSummary(),
-        fetchStageTiming(),
-        fetchAdminPatients(searchQuery ? `?search=${encodeURIComponent(searchQuery)}` : ""),
-        fetchInventory(),
-      ]);
-      setPendingUsers(pending);
-      setSummary(reportSummary);
-      setTiming(stageTiming);
-      setPatients(patientList);
-      setInventory(inventoryList);
-    } catch (loadError) {
-      setError(loadError.message);
-    }
-  }
-
-  useEffect(() => {
-    loadDashboard();
-  }, []);
+  const [loading, setLoading] = useState(true);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const hasInitializedSearchRef = useRef(false);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      loadDashboard(search);
+      setDebouncedSearch(search);
     }, 350);
     return () => clearTimeout(timeoutId);
   }, [search]);
 
-  const handleApprove = async (userId) => {
+  const loadDashboard = useCallback(
+    async ({ showLoading = false } = {}) => {
+      if (showLoading) {
+        setLoading(true);
+      }
+      const [pending, reportSummary, stageTiming, patientList, inventoryList] = await Promise.all([
+        fetchPendingUsers(),
+        fetchReportSummary(),
+        fetchStageTiming(),
+        fetchAdminPatients(debouncedSearch ? `?search=${encodeURIComponent(debouncedSearch)}` : ""),
+        fetchInventory(),
+      ]);
+
+      return {
+        pending,
+        reportSummary,
+        stageTiming,
+        patientList,
+        inventoryList,
+      };
+    },
+    [debouncedSearch]
+  );
+
+  const { lastUpdated, refresh } = useHybridDataSync({
+    fetcher: loadDashboard,
+    onData: (data, { showLoading }) => {
+      setPendingUsers(data.pending);
+      setSummary(data.reportSummary);
+      setTiming(data.stageTiming);
+      setPatients(data.patientList);
+      setInventory(data.inventoryList);
+      setError("");
+      if (showLoading) {
+        setLoading(false);
+      }
+    },
+    onError: (loadError, { showLoading }) => {
+      setError(loadError.message);
+      if (showLoading) {
+        setLoading(false);
+      }
+    },
+    relevantEventTypes: [
+      "patient_created",
+      "triage_completed",
+      "consultation_completed",
+      "prescription_updated",
+      "drug_dispensed",
+      "inventory_created",
+      "inventory_restocked",
+      "user_approved",
+      "user_rejected",
+    ],
+  });
+
+  useEffect(() => {
+    refresh({ showLoading: true, source: "initial" }).catch(() => {});
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!hasInitializedSearchRef.current) {
+      hasInitializedSearchRef.current = true;
+      return;
+    }
+    refresh({ source: "search" }).catch(() => {});
+  }, [debouncedSearch, refresh]);
+
+  const handleApprove = useCallback(async (userId) => {
     try {
       await approveUser(userId);
       setStatusMessage("User approved successfully.");
-      loadDashboard(search);
+      await refresh({ source: "after-approve" });
     } catch (actionError) {
       setError(actionError.message);
     }
-  };
+  }, [refresh]);
 
-  const handleReject = async (userId) => {
+  const handleReject = useCallback(async (userId) => {
     try {
       await rejectUser(userId);
       setStatusMessage("User rejected successfully.");
-      loadDashboard(search);
+      await refresh({ source: "after-reject" });
     } catch (actionError) {
       setError(actionError.message);
     }
-  };
+  }, [refresh]);
 
-  const handleCreateInventory = async () => {
-    if (!inventoryForm.drug_name || !inventoryForm.stock_quantity || !inventoryForm.reorder_level) {
+  const handleCreateInventory = useCallback(async () => {
+    if (!inventoryForm.drug_name || !inventoryForm.amount || !inventoryForm.stock_quantity || !inventoryForm.reorder_level) {
       setError("Fill all inventory fields.");
       return;
     }
     try {
       await createInventory({
         drug_name: inventoryForm.drug_name,
+        amount: inventoryForm.amount,
         stock_quantity: Number(inventoryForm.stock_quantity),
         reorder_level: Number(inventoryForm.reorder_level),
       });
-      setInventoryForm({ drug_name: "", stock_quantity: "", reorder_level: "" });
+      setInventoryForm({ drug_name: "", amount: "", stock_quantity: "", reorder_level: "" });
       setStatusMessage("Inventory item created.");
-      loadDashboard(search);
+      await refresh({ source: "after-create-inventory" });
     } catch (actionError) {
       setError(actionError.message);
     }
-  };
+  }, [inventoryForm, refresh]);
 
-  const handleRestock = async (id) => {
+  const handleRestock = useCallback(async (id) => {
+    const quantity = Number(restockAmounts[id]);
+    if (!quantity || quantity < 1) {
+      setError("Enter a valid restock quantity.");
+      return;
+    }
     try {
-      await restockInventoryItem(id, 10);
+      await restockInventoryItem(id, quantity);
+      setRestockAmounts((prev) => ({ ...prev, [id]: "" }));
       setStatusMessage("Inventory restocked.");
-      loadDashboard(search);
+      await refresh({ source: "after-restock" });
     } catch (actionError) {
       setError(actionError.message);
     }
-  };
+  }, [refresh, restockAmounts]);
 
-  const handleDownloadReport = () => {
-    const link = document.createElement("a");
-    link.href = getReportExportUrl();
-    const token = getStoredAccessToken();
-    if (token) {
-      fetch(getReportExportUrl(), { headers: { Authorization: `Bearer ${token}` } })
-        .then((response) => response.blob())
-        .then((blob) => {
-          const url = URL.createObjectURL(blob);
-          link.href = url;
-          link.download = "kwetu-care-report.doc";
-          link.click();
-          URL.revokeObjectURL(url);
-        })
-        .catch((downloadError) => setError(downloadError.message));
+  const handleDownloadReport = useCallback(async () => {
+    try {
+      await downloadReport();
+    } catch (downloadError) {
+      setError(downloadError.message);
     }
-  };
+  }, []);
 
   return (
     <div className="admin-page">
@@ -344,6 +402,8 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
         <Header currentUser={currentUser} onLogout={onLogout} onDownloadReport={handleDownloadReport} />
         {statusMessage && <p className="admin-status-success">{statusMessage}</p>}
         {error && <p className="admin-error">{error}</p>}
+        {lastUpdated && <p className="admin-status-box">Last updated: {lastUpdated.toLocaleTimeString()}</p>}
+        {loading && <p className="admin-status-box">Loading admin dashboard...</p>}
         <SummaryCards summary={summary} />
         <PendingUsersPanel users={pendingUsers} onApprove={handleApprove} onReject={handleReject} />
         <PatientsByCamp items={summary.patients_per_camp} />
@@ -354,6 +414,8 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
           inventory={inventory}
           form={inventoryForm}
           setForm={setInventoryForm}
+          restockAmounts={restockAmounts}
+          setRestockAmounts={setRestockAmounts}
           onCreate={handleCreateInventory}
           onRestock={handleRestock}
         />

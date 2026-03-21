@@ -67,7 +67,7 @@ async function refreshAccessToken() {
   return data.access;
 }
 
-export async function apiRequest(path, options = {}, retry = true) {
+async function authorizedFetch(path, options = {}, retry = true) {
   const token = getStoredAccessToken();
   const headers = {
     ...(options.body ? { "Content-Type": "application/json" } : {}),
@@ -86,7 +86,7 @@ export async function apiRequest(path, options = {}, retry = true) {
   if (response.status === 401 && retry && getStoredRefreshToken()) {
     try {
       const newAccessToken = await refreshAccessToken();
-      return apiRequest(
+      return authorizedFetch(
         path,
         {
           ...options,
@@ -103,6 +103,11 @@ export async function apiRequest(path, options = {}, retry = true) {
     }
   }
 
+  return response;
+}
+
+export async function apiRequest(path, options = {}, retry = true) {
+  const response = await authorizedFetch(path, options, retry);
   return parseResponse(response);
 }
 
@@ -208,8 +213,19 @@ export function restockInventoryItem(id, amount) {
   });
 }
 
-export function getReportExportUrl() {
-  return `${API_BASE_URL}/admin/reports/export/`;
+export async function downloadReport() {
+  const response = await authorizedFetch("/admin/reports/export/");
+  if (!response.ok) {
+    return parseResponse(response);
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "kwetu-care-report.doc";
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export { API_BASE_URL, getStoredAccessToken };
