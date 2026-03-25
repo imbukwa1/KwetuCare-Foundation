@@ -628,7 +628,23 @@ class DrugInventorySerializer(serializers.ModelSerializer):
 
 
 class InventoryAdjustSerializer(serializers.Serializer):
-    amount = serializers.IntegerField(min_value=1)
+    amount = serializers.IntegerField(min_value=1, required=False)
+    quantity = serializers.IntegerField(min_value=1, required=False)
+
+    def validate(self, attrs):
+        amount = attrs.get("amount")
+        quantity = attrs.get("quantity")
+
+        if amount is None and quantity is None:
+            raise serializers.ValidationError("Provide restock amount or quantity.")
+
+        if amount is not None and quantity is not None and amount != quantity:
+            raise serializers.ValidationError(
+                "Amount and quantity must match when both are provided."
+            )
+
+        attrs["amount"] = amount if amount is not None else quantity
+        return attrs
 
 
 class PatientListSerializer(serializers.ModelSerializer):
@@ -690,6 +706,7 @@ class TriageDetailSerializer(serializers.ModelSerializer):
 
 
 class PatientWorkflowDetailSerializer(serializers.ModelSerializer):
+    consultation = serializers.SerializerMethodField()
     prescriptions = serializers.SerializerMethodField()
     name = serializers.SerializerMethodField()
     guardian_name = serializers.SerializerMethodField()
@@ -709,6 +726,7 @@ class PatientWorkflowDetailSerializer(serializers.ModelSerializer):
             "priority",
             "status",
             "triage",
+            "consultation",
             "prescriptions",
         )
 
@@ -731,6 +749,17 @@ class PatientWorkflowDetailSerializer(serializers.ModelSerializer):
         if not hasattr(obj, "triage"):
             return None
         return TriageDetailSerializer(obj.triage).data
+
+    def get_consultation(self, obj):
+        if not hasattr(obj, "consultation"):
+            return None
+        prescriptions = obj.consultation.prescriptions.all().order_by("id")
+        return {
+            "id": obj.consultation.id,
+            "doctor_notes": obj.consultation.doctor_notes,
+            "created_at": obj.consultation.created_at,
+            "prescriptions": PrescriptionDetailSerializer(prescriptions, many=True).data,
+        }
 
     def get_prescriptions(self, obj):
         if not hasattr(obj, "consultation"):
@@ -762,10 +791,18 @@ class CampDrugDetailSerializer(serializers.Serializer):
     total_quantity = serializers.IntegerField()
 
 
+class StageWaitingCountsSerializer(serializers.Serializer):
+    triage = serializers.IntegerField()
+    doctor = serializers.IntegerField()
+    pharmacy = serializers.IntegerField()
+    complete = serializers.IntegerField()
+
+
 class AdminReportSerializer(serializers.Serializer):
     patients_per_camp = CampPatientSummarySerializer(many=True)
     drugs_issued_per_camp = CampDrugIssuedSummarySerializer(many=True)
     drug_details_per_camp = CampDrugDetailSerializer(many=True)
+    stage_waiting_counts = StageWaitingCountsSerializer()
     completed_patients = serializers.IntegerField()
 
 

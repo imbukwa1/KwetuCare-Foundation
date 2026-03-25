@@ -1,10 +1,12 @@
 import os
 
+from django.contrib.staticfiles.handlers import ASGIStaticFilesHandler
 from django.core.asgi import get_asgi_application
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend_config.settings')
 
 django_asgi_app = get_asgi_application()
+static_asgi_app = ASGIStaticFilesHandler(django_asgi_app)
 
 from core.realtime import updates_socket
 
@@ -14,4 +16,4 @@ async def application(scope, receive, send):
         await updates_socket(scope, receive, send)
         return
 
-    await django_asgi_app(scope, receive, send)
+    await static_asgi_app(scope, receive, send)

@@ -70,13 +70,18 @@ def build_admin_report_data():
                 "total_quantity": item["total_quantity"] or 0,
             }
         )
-    completed_patients = Patient.objects.filter(
-        status=Patient.Status.COMPLETE
-    ).count()
+    stage_waiting_counts = {
+        "triage": Patient.objects.filter(status=Patient.Status.TRIAGE).count(),
+        "doctor": Patient.objects.filter(status=Patient.Status.DOCTOR).count(),
+        "pharmacy": Patient.objects.filter(status=Patient.Status.PHARMACY).count(),
+        "complete": Patient.objects.filter(status=Patient.Status.COMPLETE).count(),
+    }
+    completed_patients = stage_waiting_counts["complete"]
     return {
         "patients_per_camp": patients_per_camp,
         "drugs_issued_per_camp": drugs_issued_per_camp,
         "drug_details_per_camp": drug_details_per_camp,
+        "stage_waiting_counts": stage_waiting_counts,
         "completed_patients": completed_patients,
     }
 

@@ -9,7 +9,6 @@ import {
   fetchInventory,
   fetchPendingUsers,
   fetchReportSummary,
-  fetchStageTiming,
   rejectUser,
   restockInventoryItem,
 } from "./api";
@@ -134,15 +133,15 @@ function DrugsByCamp({ items }) {
   );
 }
 
-function AnalyticsPanel({ timing }) {
+function StageQueuePanel({ counts }) {
   return (
     <section className="panel">
-      <div className="panel-header"><h2>Stage Timing Analytics</h2></div>
+      <div className="panel-header"><h2>Patients Waiting Per Stage</h2></div>
       <div className="camp-grid">
-        <article className="camp-card"><h4>Triage to Doctor</h4><p>{timing.average_triage_to_doctor_minutes} min</p></article>
-        <article className="camp-card"><h4>Doctor to Pharmacy</h4><p>{timing.average_doctor_to_pharmacy_minutes} min</p></article>
-        <article className="camp-card"><h4>Pharmacy to Complete</h4><p>{timing.average_pharmacy_to_complete_minutes} min</p></article>
-        <article className="camp-card"><h4>Total Completion</h4><p>{timing.average_total_completion_minutes} min</p></article>
+        <article className="camp-card"><h4>Triage</h4><p>{counts.triage || 0} waiting</p></article>
+        <article className="camp-card"><h4>Doctor</h4><p>{counts.doctor || 0} waiting</p></article>
+        <article className="camp-card"><h4>Pharmacy</h4><p>{counts.pharmacy || 0} waiting</p></article>
+        <article className="camp-card"><h4>Complete</h4><p>{counts.complete || 0} done</p></article>
       </div>
     </section>
   );
@@ -239,12 +238,11 @@ function InventoryPanel({ inventory, form, setForm, restockAmounts, setRestockAm
 
 export default function AdminDashboardPage({ currentUser, onLogout }) {
   const [pendingUsers, setPendingUsers] = useState([]);
-  const [summary, setSummary] = useState({ patients_per_camp: [], drugs_issued_per_camp: [], completed_patients: 0 });
-  const [timing, setTiming] = useState({
-    average_triage_to_doctor_minutes: 0,
-    average_doctor_to_pharmacy_minutes: 0,
-    average_pharmacy_to_complete_minutes: 0,
-    average_total_completion_minutes: 0,
+  const [summary, setSummary] = useState({
+    patients_per_camp: [],
+    drugs_issued_per_camp: [],
+    stage_waiting_counts: {},
+    completed_patients: 0,
   });
   const [patients, setPatients] = useState([]);
   const [inventory, setInventory] = useState([]);
@@ -269,10 +267,9 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
       if (showLoading) {
         setLoading(true);
       }
-      const [pending, reportSummary, stageTiming, patientList, inventoryList] = await Promise.all([
+      const [pending, reportSummary, patientList, inventoryList] = await Promise.all([
         fetchPendingUsers(),
         fetchReportSummary(),
-        fetchStageTiming(),
         fetchAdminPatients(debouncedSearch ? `?search=${encodeURIComponent(debouncedSearch)}` : ""),
         fetchInventory(),
       ]);
@@ -280,7 +277,6 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
       return {
         pending,
         reportSummary,
-        stageTiming,
         patientList,
         inventoryList,
       };
@@ -293,7 +289,6 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
     onData: (data, { showLoading }) => {
       setPendingUsers(data.pending);
       setSummary(data.reportSummary);
-      setTiming(data.stageTiming);
       setPatients(data.patientList);
       setInventory(data.inventoryList);
       setError("");
@@ -408,7 +403,7 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
         <PendingUsersPanel users={pendingUsers} onApprove={handleApprove} onReject={handleReject} />
         <PatientsByCamp items={summary.patients_per_camp} />
         <DrugsByCamp items={summary.drugs_issued_per_camp} />
-        <AnalyticsPanel timing={timing} />
+        <StageQueuePanel counts={summary.stage_waiting_counts || {}} />
         <PatientSearchPanel patients={patients} search={search} setSearch={setSearch} />
         <InventoryPanel
           inventory={inventory}

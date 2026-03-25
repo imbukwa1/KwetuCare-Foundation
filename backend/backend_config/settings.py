@@ -4,7 +4,10 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'changeme-in-production'
+SECRET_KEY = os.getenv(
+    'DJANGO_SECRET_KEY',
+    'kwetu-care-local-dev-secret-key-please-change-in-production-2026',
+)
 DEBUG = True
 ALLOWED_HOSTS = ['*']
 

@@ -8,6 +8,32 @@ import PharmacyPage from './PharmacyPage';
 import TriagePage from './TriagePage';
 import { clearTokens, fetchCurrentUser, getStoredAccessToken } from './api';
 
+const ROLE_PATHS = {
+  registration: '/registration',
+  nurse: '/triage',
+  doctor: '/doctor',
+  pharmacist: '/pharmacy',
+  admin: '/admin',
+};
+
+function navigateTo(path, { replace = false } = {}) {
+  if (window.location.pathname === path) {
+    return;
+  }
+
+  const method = replace ? 'replaceState' : 'pushState';
+  window.history[method]({}, '', path);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+function getDefaultPathForUser(user) {
+  if (!user?.is_approved) {
+    return '/pending-approval';
+  }
+
+  return ROLE_PATHS[user.role] || '/';
+}
+
 function PendingApprovalView({ user, onLogout }) {
   return (
     <div className="auth-page">
@@ -44,6 +70,13 @@ function renderDashboard(user, onLogout) {
 function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [currentPath, setCurrentPath] = useState(window.location.pathname || '/');
+
+  useEffect(() => {
+    const handleLocationChange = () => setCurrentPath(window.location.pathname || '/');
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
 
   useEffect(() => {
     async function restoreSession() {
@@ -65,9 +98,21 @@ function App() {
     restoreSession();
   }, []);
 
+  useEffect(() => {
+    if (loading || !user) {
+      return;
+    }
+
+    const expectedPath = getDefaultPathForUser(user);
+    if (currentPath !== expectedPath) {
+      navigateTo(expectedPath, { replace: true });
+    }
+  }, [currentPath, loading, user]);
+
   const handleLogout = () => {
     clearTokens();
     setUser(null);
+    navigateTo('/', { replace: true });
   };
 
   if (loading) {
@@ -75,7 +120,10 @@ function App() {
   }
 
   if (!user) {
-    return <AuthPage onAuthenticated={setUser} />;
+    return <AuthPage onAuthenticated={(nextUser) => {
+      setUser(nextUser);
+      navigateTo(getDefaultPathForUser(nextUser), { replace: true });
+    }} />;
   }
 
   if (!user.is_approved) {
