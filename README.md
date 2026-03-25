@@ -1,70 +1,88 @@
-# Getting Started with Create React App
+Overview
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+KCF streamlines the entire patient journey:
 
-## Available Scripts
+Registration → Triage → Doctor Consultation → Pharmacy → Admin Reporting
 
-In the project directory, you can run:
+Each stage is handled by a specific role, ensuring accountability, data integrity, and efficient service delivery.
 
-### `npm start`
+User Roles
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+The system supports role-based access control:
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+Registration Officer – Registers patients into the system
+Nurse – Conducts triage (vitals + notes)
+Doctor – Diagnoses and prescribes medication
+Pharmacist – Dispenses drugs and updates status
+Admin – Manages users and views reports
 
-### `npm test`
+ All users must be approved by an admin before accessing system functionality.
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+Authentication & Authorization
+Secure user signup and login
+Role-based access control
+Admin approval system (is_approved)
+Protected endpoints to prevent unauthorized access
+Core Features
+Patient Registration
+Capture patient details (name, age, gender, phone, etc.)
+Automatically assign unique registration number
+Queue patients for triage
+ Triage System
+Record:
+Temperature
+Weight
+Heart rate
+Nurse notes
+Automatically move patient to doctor stage
+ Doctor Consultation
+View triage data
+Add diagnosis and notes
+Prescribe multiple medications
+ Pharmacy
+View prescriptions
+Mark drugs as:
+Given 
+Not Available 
+Complete patient workflow
+Admin Dashboard
+Patients per camp
+Drugs issued per camp
+Completed patients
+User approval management
+Workflow Engine
 
-### `npm run build`
+The system enforces a strict workflow using a status field:
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+triage → doctor → pharmacy → complete
+No stage skipping 
+Proper validation before transitions 
+Ensures data integrity and consistency
+Real-Time Data Sync (Hybrid Approach)
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+To support multiple users (20+ concurrent users), KCF uses a hybrid synchronization model:
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+Polling (every 3–5 seconds) – keeps data updated
+Refresh-after-action – instant updates for current user
+WebSockets (optional/extended) – real-time multi-user sync
 
-### `npm run eject`
+This ensures reliability even in unstable network environments.
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+System Reliability & Safety
+Concurrency control using database transactions
+Prevention of duplicate records
+Input validation (real-world ranges)
+Role-based endpoint protection
+Audit logging (who did what, when)
+Testing
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+The system includes structured test cases covering:
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+Authentication & approval
+Patient workflow
+Role-based access
+Concurrency handling
+API integration
+Load testing (up to 100 concurrent users)
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Each function is validated with pass/fail conditions.
