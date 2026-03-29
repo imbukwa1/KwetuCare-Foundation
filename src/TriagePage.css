@@ -206,7 +206,8 @@ body {
 }
 
 .modal-form input,
-.modal-form textarea {
+.modal-form textarea,
+.modal-form select {
   margin-top: 0.35rem;
   border: 1px solid #d6bda9;
   border-radius: 8px;
@@ -215,9 +216,30 @@ body {
 }
 
 .modal-form input:focus,
-.modal-form textarea:focus {
+.modal-form textarea:focus,
+.modal-form select:focus {
   outline: 2px solid rgba(123, 25, 47, 0.2);
   border-color: var(--maroon);
+}
+
+.triage-checkbox-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.75rem;
+  font-weight: 600;
+}
+
+.triage-checkbox-row input[type="checkbox"] {
+  margin-top: 0;
+  width: auto;
+  transform: scale(1.15);
+}
+
+.doctor-section-title {
+  margin: 0.4rem 0 0;
+  color: var(--maroon);
+  font-size: 1.1rem;
 }
 
 .modal-actions {

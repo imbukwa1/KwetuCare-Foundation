@@ -80,6 +80,24 @@ class IsNurseUser(BasePermission):
         )
 
 
+class IsBloodSugarUser(BasePermission):
+    message = "Only approved blood sugar department users can perform this action."
+
+    def has_permission(self, request, view):
+        if settings.BYPASS_USER_APPROVAL:
+            return bool(
+                request.user
+                and request.user.is_authenticated
+                and request.user.role == "blood_sugar"
+            )
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_approved
+            and request.user.role == "blood_sugar"
+        )
+
+
 class IsDoctorUser(BasePermission):
     message = "Only approved doctors and specialists can perform this action."
 

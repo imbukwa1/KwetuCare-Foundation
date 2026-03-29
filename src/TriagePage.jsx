@@ -68,6 +68,7 @@ function PatientList({ patients, onStart }) {
 function TriageModal({ isOpen, patient, onClose, onSubmit }) {
   const [form, setForm] = useState({
     bloodPressure: "",
+    requiresBloodSugarCheck: false,
     assignedDoctorType: "general_doctor",
     heartRate: "",
     respiratoryRate: "",
@@ -94,7 +95,7 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
   const isFormValid = useMemo(() => {
     return (
       form.bloodPressure.trim() !== "" &&
-      form.assignedDoctorType.trim() !== "" &&
+      (form.requiresBloodSugarCheck || form.assignedDoctorType.trim() !== "") &&
       form.heartRate.trim() !== "" &&
       form.respiratoryRate.trim() !== "" &&
       form.spo2.trim() !== "" &&
@@ -106,6 +107,15 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
 
   const handleField = (field) => (event) => {
     setForm((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const handleToggleBloodSugar = (event) => {
+    const checked = event.target.checked;
+    setForm((prev) => ({
+      ...prev,
+      requiresBloodSugarCheck: checked,
+      assignedDoctorType: checked ? "" : prev.assignedDoctorType || "general_doctor",
+    }));
   };
 
   const submit = (event) => {
@@ -122,6 +132,7 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
       onSubmit({
         patient,
         bloodPressure: form.bloodPressure.trim(),
+        requiresBloodSugarCheck: form.requiresBloodSugarCheck,
         assignedDoctorType: form.assignedDoctorType,
         heartRate: Number(form.heartRate),
         respiratoryRate: Number(form.respiratoryRate),
@@ -135,6 +146,7 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
       .then(() => {
         setForm({
           bloodPressure: "",
+          requiresBloodSugarCheck: false,
           assignedDoctorType: "general_doctor",
           heartRate: "",
           respiratoryRate: "",
@@ -172,16 +184,26 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
               placeholder="e.g. 120/80"
             />
           </label>
-          <label>
-            Refer to Doctor Type *
-            <select value={form.assignedDoctorType} onChange={handleField("assignedDoctorType")}>
-              {DOCTOR_TYPE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+          <label className="triage-checkbox-row">
+            <input
+              type="checkbox"
+              checked={form.requiresBloodSugarCheck}
+              onChange={handleToggleBloodSugar}
+            />
+            <span>Requires Blood Sugar Check</span>
           </label>
+          {!form.requiresBloodSugarCheck && (
+            <label>
+              Refer to Doctor Type *
+              <select value={form.assignedDoctorType} onChange={handleField("assignedDoctorType")}>
+                {DOCTOR_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label>
             Heart Rate (bpm) *
             <input type="number" value={form.heartRate} onChange={handleField("heartRate")} placeholder="e.g. 82" />
@@ -287,7 +309,8 @@ export default function TriagePage({ currentUser, onLogout }) {
     const savedTriage = await submitTriage({
       patient_id: triageData.patient.id,
       blood_pressure: triageData.bloodPressure,
-      assigned_doctor_type: triageData.assignedDoctorType,
+      assigned_doctor_type: triageData.requiresBloodSugarCheck ? null : triageData.assignedDoctorType,
+      requires_blood_sugar_check: triageData.requiresBloodSugarCheck,
       temperature: triageData.temperature,
       weight: triageData.weight,
       height: triageData.height,
@@ -302,6 +325,11 @@ export default function TriagePage({ currentUser, onLogout }) {
         DOCTOR_TYPE_OPTIONS.find((option) => option.value === savedTriage.assigned_doctor_type)?.label || "Doctor"
       }. BMI: ${savedTriage.bmi ?? "N/A"}.`
     );
+    if (triageData.requiresBloodSugarCheck) {
+      setSuccessMessage(
+        `Triage data saved for ${triageData.patient.name}. Patient has been sent to the Blood Sugar department. BMI: ${savedTriage.bmi ?? "N/A"}.`
+      );
+    }
     closeTriage();
     await refresh({ source: "after-triage" });
   }, [closeTriage, refresh]);

@@ -13,6 +13,7 @@ from django.db import transaction
 
 from .models import (
     AuditLog,
+    BloodSugarCheck,
     Consultation,
     DentalConsultation,
     DrugInventory,
@@ -262,9 +263,11 @@ class TriageSerializer(serializers.ModelSerializer):
     patient_id = serializers.IntegerField(write_only=True)
     assigned_doctor_type = serializers.ChoiceField(
         choices=Patient.DoctorType.choices,
-        required=True,
+        required=False,
+        allow_null=True,
         write_only=True,
     )
+    requires_blood_sugar_check = serializers.BooleanField(write_only=True, default=False)
     height = serializers.DecimalField(max_digits=4, decimal_places=2, required=True)
     respiratory_rate = serializers.IntegerField(required=True)
     spo2 = serializers.IntegerField(required=True)
@@ -275,6 +278,7 @@ class TriageSerializer(serializers.ModelSerializer):
             "id",
             "patient_id",
             "patient",
+            "requires_blood_sugar_check",
             "assigned_doctor_type",
             "blood_pressure",
             "temperature",
@@ -344,9 +348,21 @@ class TriageSerializer(serializers.ModelSerializer):
         self.context["patient"] = patient
         return value
 
+    def validate(self, attrs):
+        requires_blood_sugar_check = attrs.get("requires_blood_sugar_check", False)
+        assigned_doctor_type = attrs.get("assigned_doctor_type")
+
+        if not requires_blood_sugar_check and not assigned_doctor_type:
+            raise serializers.ValidationError(
+                {"assigned_doctor_type": "Select the doctor type when blood sugar check is not required."}
+            )
+
+        return attrs
+
     def create(self, validated_data):
         validated_data.pop("patient_id")
-        assigned_doctor_type = validated_data.pop("assigned_doctor_type")
+        assigned_doctor_type = validated_data.pop("assigned_doctor_type", None)
+        requires_blood_sugar_check = validated_data.pop("requires_blood_sugar_check", False)
 
         with transaction.atomic():
             patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
@@ -362,15 +378,20 @@ class TriageSerializer(serializers.ModelSerializer):
                 )
 
             triage = Triage.objects.create(patient=patient, **validated_data)
-            patient.status = Patient.Status.DOCTOR
-            patient.doctor_started_at = timezone.now()
-            patient.assigned_doctor_type = assigned_doctor_type
-            patient.save(update_fields=["status", "doctor_started_at", "assigned_doctor_type"])
+            if requires_blood_sugar_check:
+                patient.status = Patient.Status.BLOOD_SUGAR
+                patient.save(update_fields=["status"])
+            else:
+                patient.status = Patient.Status.DOCTOR
+                patient.doctor_started_at = timezone.now()
+                patient.assigned_doctor_type = assigned_doctor_type
+                patient.save(update_fields=["status", "doctor_started_at", "assigned_doctor_type"])
             create_audit_log(
                 user=self.context["request"].user,
                 action="triage_completed",
                 patient=patient,
                 details={
+                    "requires_blood_sugar_check": requires_blood_sugar_check,
                     "assigned_doctor_type": patient.assigned_doctor_type,
                     "blood_pressure": triage.blood_pressure,
                     "temperature": str(triage.temperature),
@@ -388,6 +409,7 @@ class TriageSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         data["assigned_doctor_type"] = instance.patient.assigned_doctor_type
+        data["requires_blood_sugar_check"] = instance.patient.status == Patient.Status.BLOOD_SUGAR
         return data
 
 
@@ -1570,6 +1592,94 @@ class TriageDetailSerializer(serializers.ModelSerializer):
         )
 
 
+class BloodSugarCheckSerializer(serializers.ModelSerializer):
+    patient_id = serializers.IntegerField(write_only=True)
+    assigned_doctor_type = serializers.ChoiceField(
+        choices=Patient.DoctorType.choices,
+        write_only=True,
+    )
+
+    class Meta:
+        model = BloodSugarCheck
+        fields = (
+            "id",
+            "patient_id",
+            "patient",
+            "blood_sugar_level",
+            "test_type",
+            "notes",
+            "assigned_doctor_type",
+            "created_at",
+        )
+        read_only_fields = ("id", "patient", "created_at")
+
+    def validate_blood_sugar_level(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Blood sugar level must be greater than 0.")
+        if value > 1000:
+            raise serializers.ValidationError("Blood sugar level is unrealistically high.")
+        return value
+
+    def validate_patient_id(self, value):
+        try:
+            patient = Patient.objects.get(id=value)
+        except Patient.DoesNotExist as exc:
+            raise serializers.ValidationError("Patient not found.") from exc
+
+        if patient.status != Patient.Status.BLOOD_SUGAR:
+            raise serializers.ValidationError(
+                "Only patients in the blood sugar stage can be processed here."
+            )
+
+        if hasattr(patient, "blood_sugar_check"):
+            raise serializers.ValidationError("Blood sugar has already been recorded for this patient.")
+
+        self.context["patient"] = patient
+        return value
+
+    def create(self, validated_data):
+        validated_data.pop("patient_id")
+        assigned_doctor_type = validated_data.pop("assigned_doctor_type")
+
+        with transaction.atomic():
+            patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
+
+            if patient.status != Patient.Status.BLOOD_SUGAR:
+                raise serializers.ValidationError(
+                    "This patient is no longer in the blood sugar stage."
+                )
+
+            if BloodSugarCheck.objects.filter(patient=patient).exists():
+                raise serializers.ValidationError(
+                    "Blood sugar has already been recorded for this patient."
+                )
+
+            blood_sugar = BloodSugarCheck.objects.create(patient=patient, **validated_data)
+            patient.status = Patient.Status.DOCTOR
+            patient.doctor_started_at = timezone.now()
+            patient.assigned_doctor_type = assigned_doctor_type
+            patient.save(update_fields=["status", "doctor_started_at", "assigned_doctor_type"])
+
+            create_audit_log(
+                user=self.context["request"].user,
+                action="blood_sugar_checked",
+                patient=patient,
+                details={
+                    "blood_sugar_level": str(blood_sugar.blood_sugar_level),
+                    "test_type": blood_sugar.test_type,
+                    "assigned_doctor_type": assigned_doctor_type,
+                    "status": patient.status,
+                },
+            )
+            return blood_sugar
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["assigned_doctor_type"] = instance.patient.assigned_doctor_type
+        data["status"] = instance.patient.status
+        return data
+
+
 class PatientWorkflowDetailSerializer(serializers.ModelSerializer):
     consultation = serializers.SerializerMethodField()
     prescriptions = serializers.SerializerMethodField()
@@ -1577,6 +1687,7 @@ class PatientWorkflowDetailSerializer(serializers.ModelSerializer):
     guardian_name = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
     triage = serializers.SerializerMethodField()
+    blood_sugar_check = serializers.SerializerMethodField()
 
     class Meta:
         model = Patient
@@ -1593,6 +1704,7 @@ class PatientWorkflowDetailSerializer(serializers.ModelSerializer):
             "priority",
             "status",
             "triage",
+            "blood_sugar_check",
             "consultation",
             "prescriptions",
         )
@@ -1616,6 +1728,16 @@ class PatientWorkflowDetailSerializer(serializers.ModelSerializer):
         if not hasattr(obj, "triage"):
             return None
         return TriageDetailSerializer(obj.triage).data
+
+    def get_blood_sugar_check(self, obj):
+        if not hasattr(obj, "blood_sugar_check"):
+            return None
+        return {
+            "blood_sugar_level": str(obj.blood_sugar_check.blood_sugar_level),
+            "test_type": obj.blood_sugar_check.test_type,
+            "notes": obj.blood_sugar_check.notes,
+            "created_at": obj.blood_sugar_check.created_at,
+        }
 
     def get_consultation(self, obj):
         if not hasattr(obj, "consultation"):
@@ -1660,6 +1782,7 @@ class CampDrugDetailSerializer(serializers.Serializer):
 
 class StageWaitingCountsSerializer(serializers.Serializer):
     triage = serializers.IntegerField()
+    blood_sugar = serializers.IntegerField()
     doctor = serializers.IntegerField()
     pharmacy = serializers.IntegerField()
     complete = serializers.IntegerField()

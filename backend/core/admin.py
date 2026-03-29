@@ -3,6 +3,7 @@ from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from .models import (
     AuditLog,
+    BloodSugarCheck,
     Consultation,
     DentalConsultation,
     DrugInventory,
@@ -50,6 +51,12 @@ class TriageAdmin(admin.ModelAdmin):
         "spo2",
         "created_at",
     )
+    search_fields = ("patient__reg_no", "patient__name")
+
+
+@admin.register(BloodSugarCheck)
+class BloodSugarCheckAdmin(admin.ModelAdmin):
+    list_display = ("patient", "blood_sugar_level", "test_type", "created_at")
     search_fields = ("patient__reg_no", "patient__name")
 
 

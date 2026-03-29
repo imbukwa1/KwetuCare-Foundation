@@ -6,6 +6,7 @@ import { login, signup } from "./api";
 const ROLE_OPTIONS = [
   { value: "registration", label: "Registration Officer" },
   { value: "nurse", label: "Nurse" },
+  { value: "blood_sugar", label: "Blood Sugar Department" },
   { value: "general_doctor", label: "General Doctor" },
   { value: "pediatrician", label: "Pediatrician" },
   { value: "gynecologist", label: "Gynecologist" },

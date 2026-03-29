@@ -149,6 +149,13 @@ export function submitTriage(payload) {
   });
 }
 
+export function submitBloodSugarCheck(payload) {
+  return apiRequest("/blood-sugar/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function submitConsultation(payload) {
   return apiRequest("/consultations/", {
     method: "POST",

@@ -7,6 +7,7 @@ class User(AbstractUser):
     class Role(models.TextChoices):
         REGISTRATION = "registration", "Registration"
         NURSE = "nurse", "Nurse"
+        BLOOD_SUGAR = "blood_sugar", "Blood Sugar Department"
         GENERAL_DOCTOR = "general_doctor", "General Doctor"
         PEDIATRICIAN = "pediatrician", "Pediatrician"
         GYNECOLOGIST = "gynecologist", "Gynecologist"
@@ -31,6 +32,7 @@ class Patient(models.Model):
 
     class Status(models.TextChoices):
         TRIAGE = "triage", "Triage"
+        BLOOD_SUGAR = "blood_sugar", "Blood Sugar"
         DOCTOR = "doctor", "Doctor"
         PHARMACY = "pharmacy", "Pharmacy"
         COMPLETE = "complete", "Complete"
@@ -108,6 +110,25 @@ class Triage(models.Model):
 
     def __str__(self):
         return f"Triage for {self.patient.reg_no}"
+
+
+class BloodSugarCheck(models.Model):
+    class TestType(models.TextChoices):
+        FASTING = "fasting", "Fasting"
+        RANDOM = "random", "Random"
+
+    patient = models.OneToOneField(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="blood_sugar_check",
+    )
+    blood_sugar_level = models.DecimalField(max_digits=6, decimal_places=2)
+    test_type = models.CharField(max_length=20, choices=TestType.choices)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Blood Sugar Check for {self.patient.reg_no}"
 
 
 class Consultation(models.Model):

@@ -14,6 +14,7 @@ from .permissions import (
     IsAdminUserRole,
     IsAdminOrPharmacistUser,
     IsApprovedUser,
+    IsBloodSugarUser,
     IsDentalUser,
     IsDoctorUser,
     IsGynecologistUser,
@@ -27,6 +28,7 @@ from .permissions import (
     IsRegistrationOfficer,
 )
 from .serializers import (
+    BloodSugarCheckSerializer,
     ConsultationCreateSerializer,
     DentalConsultationCreateSerializer,
     DrugInventorySerializer,
@@ -85,6 +87,7 @@ def build_admin_report_data():
         )
     stage_waiting_counts = {
         "triage": Patient.objects.filter(status=Patient.Status.TRIAGE).count(),
+        "blood_sugar": Patient.objects.filter(status=Patient.Status.BLOOD_SUGAR).count(),
         "doctor": Patient.objects.filter(status=Patient.Status.DOCTOR).count(),
         "pharmacy": Patient.objects.filter(status=Patient.Status.PHARMACY).count(),
         "complete": Patient.objects.filter(status=Patient.Status.COMPLETE).count(),
@@ -162,6 +165,11 @@ class PatientRegistrationView(generics.CreateAPIView):
 class TriageCreateView(generics.CreateAPIView):
     serializer_class = TriageSerializer
     permission_classes = [permissions.IsAuthenticated, IsNurseUser]
+
+
+class BloodSugarCheckCreateView(generics.CreateAPIView):
+    serializer_class = BloodSugarCheckSerializer
+    permission_classes = [permissions.IsAuthenticated, IsBloodSugarUser]
 
 
 class ConsultationCreateView(generics.CreateAPIView):
@@ -249,6 +257,7 @@ class StageQueueView(generics.ListAPIView):
 
     role_stage_map = {
         "nurse": Patient.Status.TRIAGE,
+        "blood_sugar": Patient.Status.BLOOD_SUGAR,
         "pharmacist": Patient.Status.PHARMACY,
         **{role: Patient.Status.DOCTOR for role in CONSULTATION_ROLES},
     }

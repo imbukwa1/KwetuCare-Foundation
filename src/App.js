@@ -2,6 +2,7 @@ import './App.css';
 import { useEffect, useState } from 'react';
 import AdminDashboardPage from './AdminDashboardPage';
 import AuthPage from './AuthPage';
+import BloodSugarPage from './BloodSugarPage';
 import DentalConsultationPage from './DentalConsultationPage';
 import DoctorConsultationPage from './DoctorConsultationPage';
 import GynecologyConsultationPage from './GynecologyConsultationPage';
@@ -17,6 +18,7 @@ import { clearTokens, fetchCurrentUser, getStoredAccessToken } from './api';
 const ROLE_PATHS = {
   registration: '/registration',
   nurse: '/triage',
+  blood_sugar: '/blood-sugar',
   general_doctor: '/doctor',
   pediatrician: '/pediatric',
   gynecologist: '/gynecology',
@@ -68,6 +70,8 @@ function renderDashboard(user, onLogout) {
       return <PatientIntakeForm currentUser={user} onLogout={onLogout} />;
     case 'nurse':
       return <TriagePage currentUser={user} onLogout={onLogout} />;
+    case 'blood_sugar':
+      return <BloodSugarPage currentUser={user} onLogout={onLogout} />;
     case 'general_doctor':
       return <DoctorConsultationPage currentUser={user} onLogout={onLogout} />;
     case 'gynecologist':
