@@ -11,7 +11,20 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from django.db import transaction
 
-from .models import AuditLog, Consultation, DrugInventory, Patient, Prescription, Triage
+from .models import (
+    AuditLog,
+    Consultation,
+    DentalConsultation,
+    DrugInventory,
+    GynecologyConsultation,
+    NutritionConsultation,
+    ObstetricConsultation,
+    OpticianConsultation,
+    Patient,
+    PediatricConsultation,
+    Prescription,
+    Triage,
+)
 from .realtime import publish_audit_event
 
 User = get_user_model()
@@ -405,6 +418,30 @@ class PrescriptionCreateSerializer(serializers.ModelSerializer):
 class ConsultationCreateSerializer(serializers.ModelSerializer):
     patient_id = serializers.IntegerField(write_only=True)
     prescriptions = PrescriptionCreateSerializer(many=True)
+    
+    # Health Information
+    healthInformation = serializers.JSONField(write_only=True, required=False)
+    
+    # History of Presenting Illness
+    historyOfPresentingIllness = serializers.JSONField(write_only=True, required=False)
+    
+    # Past Medical History
+    pastMedicalHistory = serializers.JSONField(write_only=True, required=False)
+    
+    # Family History
+    familyHistory = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    
+    # Medications and Allergies
+    medicationsAndAllergies = serializers.JSONField(write_only=True, required=False)
+    
+    # Review of Systems
+    reviewOfSystems = serializers.JSONField(write_only=True, required=False)
+    
+    # Diagnosis and Management
+    diagnosis = serializers.CharField(required=True)
+    doctorNotes = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    recommendations = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    followUpInstructions = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = Consultation
@@ -412,9 +449,41 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
             "id",
             "patient_id",
             "patient",
+            "health_conditions",
+            "on_medication",
+            "medication_details",
+            "illness_onset",
+            "illness_severity",
+            "illness_location",
+            "associated_symptoms",
+            "chronic_illnesses",
+            "surgeries",
+            "hospitalizations",
+            "significant_infections",
+            "family_history",
+            "current_medications",
+            "drug_allergies",
+            "food_allergies",
+            "systems_heent",
+            "systems_cardiovascular",
+            "systems_respiratory",
+            "systems_gastrointestinal",
+            "systems_musculoskeletal",
+            "systems_neurological",
+            "diagnosis",
             "doctor_notes",
+            "recommendations",
+            "follow_up_instructions",
             "prescriptions",
             "created_at",
+            "healthInformation",
+            "historyOfPresentingIllness",
+            "pastMedicalHistory",
+            "familyHistory",
+            "medicationsAndAllergies",
+            "reviewOfSystems",
+            "doctorNotes",
+            "followUpInstructions",
         )
         read_only_fields = ("id", "patient", "created_at")
 
@@ -470,6 +539,49 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         prescriptions_data = validated_data.pop("prescriptions")
         validated_data.pop("patient_id")
+        
+        # Extract camelCase fields and map to snake_case
+        health_info = validated_data.pop("healthInformation", {})
+        illness_history = validated_data.pop("historyOfPresentingIllness", {})
+        past_history = validated_data.pop("pastMedicalHistory", {})
+        family = validated_data.pop("familyHistory", "")
+        meds_allergies = validated_data.pop("medicationsAndAllergies", {})
+        systems = validated_data.pop("reviewOfSystems", {})
+        doctor_notes = validated_data.pop("doctorNotes", "")
+        recommendations = validated_data.pop("recommendations", "")
+        follow_up = validated_data.pop("followUpInstructions", "")
+        
+        # Map extracted data to model fields
+        validated_data["health_conditions"] = health_info.get("conditions", [])
+        validated_data["on_medication"] = health_info.get("onMedication", "no")
+        validated_data["medication_details"] = health_info.get("medicationDetails", "")
+        
+        validated_data["illness_onset"] = illness_history.get("onset", "")
+        validated_data["illness_severity"] = illness_history.get("severity", "")
+        validated_data["illness_location"] = illness_history.get("location", "")
+        validated_data["associated_symptoms"] = illness_history.get("associatedSymptoms", "")
+        
+        validated_data["chronic_illnesses"] = past_history.get("chronicIllnesses", "")
+        validated_data["surgeries"] = past_history.get("surgeries", [])
+        validated_data["hospitalizations"] = past_history.get("hospitalizations", [])
+        validated_data["significant_infections"] = past_history.get("significantInfections", "")
+        
+        validated_data["family_history"] = family
+        
+        validated_data["current_medications"] = meds_allergies.get("currentMedications", "")
+        validated_data["drug_allergies"] = meds_allergies.get("drugAllergies", "")
+        validated_data["food_allergies"] = meds_allergies.get("foodAllergies", "")
+        
+        validated_data["systems_heent"] = systems.get("heent", "")
+        validated_data["systems_cardiovascular"] = systems.get("cardiovascular", "")
+        validated_data["systems_respiratory"] = systems.get("respiratory", "")
+        validated_data["systems_gastrointestinal"] = systems.get("gastrointestinal", "")
+        validated_data["systems_musculoskeletal"] = systems.get("musculoskeletal", "")
+        validated_data["systems_neurological"] = systems.get("neurological", "")
+        
+        validated_data["doctor_notes"] = doctor_notes
+        validated_data["recommendations"] = recommendations
+        validated_data["follow_up_instructions"] = follow_up
 
         patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
 
@@ -501,9 +613,715 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
             details={
                 "status": patient.status,
                 "prescription_count": len(prescriptions_data),
+                "diagnosis": consultation.diagnosis,
             },
         )
         return consultation
+
+
+class PediatricConsultationCreateSerializer(serializers.ModelSerializer):
+    patient_id = serializers.IntegerField(write_only=True)
+    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True)
+
+    class Meta:
+        model = PediatricConsultation
+        fields = (
+            "id",
+            "patient_id",
+            "presenting_complaint",
+            "history_presenting_illness",
+            "past_medical_history",
+            "prenatal_antenatal_history",
+            "birth_history",
+            "nutritional_history",
+            "growth_development_history",
+            "family_social_history",
+            "diagnosis",
+            "prescriptions",
+            "created_at",
+        )
+        read_only_fields = ("id", "created_at")
+
+    def validate_patient_id(self, value):
+        try:
+            patient = Patient.objects.get(id=value)
+        except Patient.DoesNotExist as exc:
+            raise serializers.ValidationError("Patient not found.") from exc
+
+        if patient.status != Patient.Status.DOCTOR:
+            raise serializers.ValidationError(
+                "Only patients in the doctor stage can be processed by a pediatrician."
+            )
+
+        if patient.assigned_doctor_type != Patient.DoctorType.PEDIATRICIAN:
+            raise serializers.ValidationError("This patient is not assigned to pediatric care.")
+
+        if hasattr(patient, "pediatric_consultation"):
+            raise serializers.ValidationError("Pediatric consultation has already been recorded for this patient.")
+
+        if hasattr(patient, "consultation"):
+            raise serializers.ValidationError("Consultation has already been recorded for this patient.")
+
+        self.context["patient"] = patient
+        return value
+
+    def validate_prescriptions(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one prescription is required.")
+        inventory_by_name = {
+            item.drug_name.strip().lower(): item.drug_name
+            for item in DrugInventory.objects.all()
+        }
+        normalized_items = []
+        seen_drugs = set()
+        for item in value:
+            drug_name = item["drug_name"].strip().lower()
+            if drug_name in seen_drugs:
+                raise serializers.ValidationError("Duplicate drug names are not allowed in one consultation.")
+            canonical_name = inventory_by_name.get(drug_name)
+            if canonical_name is None:
+                raise serializers.ValidationError(
+                    f"{item['drug_name'].strip()} is not available in inventory."
+                )
+            seen_drugs.add(drug_name)
+            normalized_items.append({**item, "drug_name": canonical_name})
+        return normalized_items
+
+    @transaction.atomic
+    def create(self, validated_data):
+        prescriptions_data = validated_data.pop("prescriptions")
+        validated_data.pop("patient_id")
+
+        patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
+
+        if patient.status != Patient.Status.DOCTOR:
+            raise serializers.ValidationError("This patient is no longer in the doctor stage.")
+
+        if patient.assigned_doctor_type != Patient.DoctorType.PEDIATRICIAN:
+            raise serializers.ValidationError("This patient is not assigned to pediatric care.")
+
+        pediatric_consultation = PediatricConsultation.objects.create(patient=patient, **validated_data)
+
+        note_sections = [
+            ("Presenting Complaint", pediatric_consultation.presenting_complaint),
+            ("History of Presenting Illness", pediatric_consultation.history_presenting_illness),
+            ("Past Medical History", pediatric_consultation.past_medical_history),
+            ("Pre-natal / Ante-natal History", pediatric_consultation.prenatal_antenatal_history),
+            ("Birth History", pediatric_consultation.birth_history),
+            ("Nutritional History", pediatric_consultation.nutritional_history),
+            ("Growth and Development History", pediatric_consultation.growth_development_history),
+            ("Family and Social History", pediatric_consultation.family_social_history),
+            ("Diagnosis", pediatric_consultation.diagnosis),
+        ]
+        consultation_notes = "\n\n".join(
+            f"{title}:\n{content}" for title, content in note_sections if content.strip()
+        )
+
+        consultation = Consultation.objects.create(
+            patient=patient,
+            doctor_notes=consultation_notes,
+        )
+
+        for prescription_data in prescriptions_data:
+            Prescription.objects.create(consultation=consultation, **prescription_data)
+
+        patient.status = Patient.Status.PHARMACY
+        patient.pharmacy_started_at = timezone.now()
+        patient.save(update_fields=["status", "pharmacy_started_at"])
+
+        create_audit_log(
+            user=self.context["request"].user,
+            action="pediatric_consultation_completed",
+            patient=patient,
+            details={
+                "status": patient.status,
+                "prescription_count": len(prescriptions_data),
+            },
+        )
+        return pediatric_consultation
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["patient_id"] = instance.patient_id
+        data["status"] = instance.patient.status
+        data["prescription_count"] = instance.patient.consultation.prescriptions.count()
+        return data
+
+
+class WomensHealthConsultationBaseSerializer(serializers.ModelSerializer):
+    patient_id = serializers.IntegerField(write_only=True)
+    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True)
+
+    assigned_doctor_type = None
+    consultation_model = None
+    audit_action = ""
+
+    def validate_patient_id(self, value):
+        try:
+            patient = Patient.objects.get(id=value)
+        except Patient.DoesNotExist as exc:
+            raise serializers.ValidationError("Patient not found.") from exc
+
+        if patient.status != Patient.Status.DOCTOR:
+            raise serializers.ValidationError(
+                "Only patients in the doctor stage can be processed in this module."
+            )
+
+        if patient.assigned_doctor_type != self.assigned_doctor_type:
+            raise serializers.ValidationError("This patient is not assigned to this specialist.")
+
+        if Consultation.objects.filter(patient=patient).exists():
+            raise serializers.ValidationError("Consultation has already been recorded for this patient.")
+
+        if self.consultation_model.objects.filter(patient=patient).exists():
+            raise serializers.ValidationError("Specialist consultation has already been recorded for this patient.")
+
+        self.context["patient"] = patient
+        return value
+
+    def validate_prescriptions(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one prescription is required.")
+
+        inventory_by_name = {
+            item.drug_name.strip().lower(): item.drug_name
+            for item in DrugInventory.objects.all()
+        }
+        normalized_items = []
+        seen_drugs = set()
+        for item in value:
+            drug_name = item["drug_name"].strip().lower()
+            if drug_name in seen_drugs:
+                raise serializers.ValidationError("Duplicate drug names are not allowed in one consultation.")
+            canonical_name = inventory_by_name.get(drug_name)
+            if canonical_name is None:
+                raise serializers.ValidationError(
+                    f"{item['drug_name'].strip()} is not available in inventory."
+                )
+            seen_drugs.add(drug_name)
+            normalized_items.append({**item, "drug_name": canonical_name})
+        return normalized_items
+
+    def build_consultation_notes(self, specialist_consultation):
+        sections = [
+            ("Presenting Complaints", specialist_consultation.presenting_complaints),
+            ("History of Presenting Complaints", specialist_consultation.history_presenting_complaints),
+            ("Antenatal History", specialist_consultation.antenatal_history),
+            ("Obstetric History", specialist_consultation.obstetric_history),
+            ("Gynecological History", specialist_consultation.gynecological_history),
+            ("Sexual and Reproductive History", specialist_consultation.sexual_reproductive_history),
+            ("Past Medical, Surgical, and Family History", specialist_consultation.past_medical_surgical_family_history),
+            ("Examination and Review of Systems", specialist_consultation.examination_review_systems),
+            ("Impression / Diagnosis", specialist_consultation.diagnosis),
+            ("Treatment Plan / Action Plan", specialist_consultation.treatment_plan),
+        ]
+        return "\n\n".join(
+            f"{title}:\n{content}" for title, content in sections if content.strip()
+        )
+
+    @transaction.atomic
+    def create(self, validated_data):
+        prescriptions_data = validated_data.pop("prescriptions")
+        validated_data.pop("patient_id")
+
+        patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
+
+        if patient.status != Patient.Status.DOCTOR:
+            raise serializers.ValidationError("This patient is no longer in the doctor stage.")
+
+        if patient.assigned_doctor_type != self.assigned_doctor_type:
+            raise serializers.ValidationError("This patient is not assigned to this specialist.")
+
+        if Consultation.objects.filter(patient=patient).exists():
+            raise serializers.ValidationError("Consultation has already been recorded for this patient.")
+
+        if self.consultation_model.objects.filter(patient=patient).exists():
+            raise serializers.ValidationError("Specialist consultation has already been recorded for this patient.")
+
+        specialist_consultation = self.consultation_model.objects.create(patient=patient, **validated_data)
+        consultation = Consultation.objects.create(
+            patient=patient,
+            doctor_notes=self.build_consultation_notes(specialist_consultation),
+        )
+
+        for prescription_data in prescriptions_data:
+            Prescription.objects.create(consultation=consultation, **prescription_data)
+
+        patient.status = Patient.Status.PHARMACY
+        patient.pharmacy_started_at = timezone.now()
+        patient.save(update_fields=["status", "pharmacy_started_at"])
+
+        create_audit_log(
+            user=self.context["request"].user,
+            action=self.audit_action,
+            patient=patient,
+            details={
+                "status": patient.status,
+                "prescription_count": len(prescriptions_data),
+            },
+        )
+        return specialist_consultation
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["patient_id"] = instance.patient_id
+        data["status"] = instance.patient.status
+        data["prescription_count"] = instance.patient.consultation.prescriptions.count()
+        return data
+
+
+class GynecologyConsultationCreateSerializer(WomensHealthConsultationBaseSerializer):
+    assigned_doctor_type = Patient.DoctorType.GYNECOLOGIST
+    consultation_model = GynecologyConsultation
+    audit_action = "gynecology_consultation_completed"
+
+    class Meta:
+        model = GynecologyConsultation
+        fields = (
+            "id",
+            "patient_id",
+            "presenting_complaints",
+            "history_presenting_complaints",
+            "antenatal_history",
+            "obstetric_history",
+            "gynecological_history",
+            "sexual_reproductive_history",
+            "past_medical_surgical_family_history",
+            "examination_review_systems",
+            "diagnosis",
+            "treatment_plan",
+            "prescriptions",
+            "created_at",
+        )
+        read_only_fields = ("id", "created_at")
+
+
+class ObstetricConsultationCreateSerializer(WomensHealthConsultationBaseSerializer):
+    assigned_doctor_type = Patient.DoctorType.OBSTETRICIAN
+    consultation_model = ObstetricConsultation
+    audit_action = "obstetric_consultation_completed"
+
+    class Meta:
+        model = ObstetricConsultation
+        fields = (
+            "id",
+            "patient_id",
+            "presenting_complaints",
+            "history_presenting_complaints",
+            "antenatal_history",
+            "obstetric_history",
+            "gynecological_history",
+            "sexual_reproductive_history",
+            "past_medical_surgical_family_history",
+            "examination_review_systems",
+            "diagnosis",
+            "treatment_plan",
+            "prescriptions",
+            "created_at",
+        )
+        read_only_fields = ("id", "created_at")
+
+
+class NutritionConsultationCreateSerializer(serializers.ModelSerializer):
+    patient_id = serializers.IntegerField(write_only=True)
+    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True)
+
+    class Meta:
+        model = NutritionConsultation
+        fields = (
+            "id",
+            "patient_id",
+            "presenting_complaint",
+            "dietary_history",
+            "nutritional_assessment",
+            "medical_health_conditions",
+            "child_feeding_history",
+            "lifestyle_assessment",
+            "nutrition_diagnosis",
+            "risk_level",
+            "nutrition_plan",
+            "prescriptions",
+            "created_at",
+        )
+        read_only_fields = ("id", "created_at")
+
+    def validate_patient_id(self, value):
+        try:
+            patient = Patient.objects.get(id=value)
+        except Patient.DoesNotExist as exc:
+            raise serializers.ValidationError("Patient not found.") from exc
+
+        if patient.status != Patient.Status.DOCTOR:
+            raise serializers.ValidationError(
+                "Only patients in the doctor stage can be processed by a nutritionist."
+            )
+
+        if patient.assigned_doctor_type != Patient.DoctorType.NUTRITIONIST:
+            raise serializers.ValidationError("This patient is not assigned to nutrition care.")
+
+        if hasattr(patient, "nutrition_consultation"):
+            raise serializers.ValidationError("Nutrition consultation has already been recorded for this patient.")
+
+        if hasattr(patient, "consultation"):
+            raise serializers.ValidationError("Consultation has already been recorded for this patient.")
+
+        self.context["patient"] = patient
+        return value
+
+    def validate_prescriptions(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one prescription is required.")
+        inventory_by_name = {
+            item.drug_name.strip().lower(): item.drug_name
+            for item in DrugInventory.objects.all()
+        }
+        normalized_items = []
+        seen_drugs = set()
+        for item in value:
+            drug_name = item["drug_name"].strip().lower()
+            if drug_name in seen_drugs:
+                raise serializers.ValidationError("Duplicate drug names are not allowed in one consultation.")
+            canonical_name = inventory_by_name.get(drug_name)
+            if canonical_name is None:
+                raise serializers.ValidationError(
+                    f"{item['drug_name'].strip()} is not available in inventory."
+                )
+            seen_drugs.add(drug_name)
+            normalized_items.append({**item, "drug_name": canonical_name})
+        return normalized_items
+
+    @transaction.atomic
+    def create(self, validated_data):
+        prescriptions_data = validated_data.pop("prescriptions")
+        validated_data.pop("patient_id")
+
+        patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
+
+        if patient.status != Patient.Status.DOCTOR:
+            raise serializers.ValidationError("This patient is no longer in the doctor stage.")
+
+        if patient.assigned_doctor_type != Patient.DoctorType.NUTRITIONIST:
+            raise serializers.ValidationError("This patient is not assigned to nutrition care.")
+
+        if NutritionConsultation.objects.filter(patient=patient).exists():
+            raise serializers.ValidationError("Nutrition consultation has already been recorded for this patient.")
+
+        if Consultation.objects.filter(patient=patient).exists():
+            raise serializers.ValidationError("Consultation has already been recorded for this patient.")
+
+        nutrition_consultation = NutritionConsultation.objects.create(patient=patient, **validated_data)
+        note_sections = [
+            ("Presenting Complaint", nutrition_consultation.presenting_complaint),
+            ("Dietary History", nutrition_consultation.dietary_history),
+            ("Nutritional Assessment", nutrition_consultation.nutritional_assessment),
+            ("Medical and Health Conditions", nutrition_consultation.medical_health_conditions),
+            ("Infant/Child Feeding History", nutrition_consultation.child_feeding_history),
+            ("Lifestyle Assessment", nutrition_consultation.lifestyle_assessment),
+            (
+                "Nutrition Diagnosis",
+                f"{nutrition_consultation.get_nutrition_diagnosis_display()} | Risk level: {nutrition_consultation.get_risk_level_display()}",
+            ),
+            ("Nutrition Plan", nutrition_consultation.nutrition_plan),
+        ]
+        consultation_notes = "\n\n".join(
+            f"{title}:\n{content}" for title, content in note_sections if content.strip()
+        )
+
+        consultation = Consultation.objects.create(
+            patient=patient,
+            doctor_notes=consultation_notes,
+        )
+
+        for prescription_data in prescriptions_data:
+            Prescription.objects.create(consultation=consultation, **prescription_data)
+
+        patient.status = Patient.Status.PHARMACY
+        patient.pharmacy_started_at = timezone.now()
+        patient.save(update_fields=["status", "pharmacy_started_at"])
+
+        create_audit_log(
+            user=self.context["request"].user,
+            action="nutrition_consultation_completed",
+            patient=patient,
+            details={
+                "status": patient.status,
+                "prescription_count": len(prescriptions_data),
+                "nutrition_diagnosis": nutrition_consultation.nutrition_diagnosis,
+                "risk_level": nutrition_consultation.risk_level,
+            },
+        )
+        return nutrition_consultation
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["patient_id"] = instance.patient_id
+        data["status"] = instance.patient.status
+        data["prescription_count"] = instance.patient.consultation.prescriptions.count()
+        return data
+
+
+class OpticianConsultationCreateSerializer(serializers.ModelSerializer):
+    patient_id = serializers.IntegerField(write_only=True)
+    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True)
+
+    class Meta:
+        model = OpticianConsultation
+        fields = (
+            "id",
+            "patient_id",
+            "presenting_complaint",
+            "ocular_history",
+            "visual_symptoms_functional_impact",
+            "past_ocular_medical_history",
+            "medication_allergy_eye_drop_history",
+            "examination_vision_assessment",
+            "diagnosis",
+            "treatment_plan",
+            "prescriptions",
+            "created_at",
+        )
+        read_only_fields = ("id", "created_at")
+
+    def validate_patient_id(self, value):
+        try:
+            patient = Patient.objects.get(id=value)
+        except Patient.DoesNotExist as exc:
+            raise serializers.ValidationError("Patient not found.") from exc
+
+        if patient.status != Patient.Status.DOCTOR:
+            raise serializers.ValidationError(
+                "Only patients in the doctor stage can be processed by an optician."
+            )
+
+        if patient.assigned_doctor_type != Patient.DoctorType.OPTICIAN:
+            raise serializers.ValidationError("This patient is not assigned to optician care.")
+
+        if hasattr(patient, "optician_consultation"):
+            raise serializers.ValidationError("Optician consultation has already been recorded for this patient.")
+
+        if hasattr(patient, "consultation"):
+            raise serializers.ValidationError("Consultation has already been recorded for this patient.")
+
+        self.context["patient"] = patient
+        return value
+
+    def validate_prescriptions(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one prescription is required.")
+        inventory_by_name = {
+            item.drug_name.strip().lower(): item.drug_name
+            for item in DrugInventory.objects.all()
+        }
+        normalized_items = []
+        seen_drugs = set()
+        for item in value:
+            drug_name = item["drug_name"].strip().lower()
+            if drug_name in seen_drugs:
+                raise serializers.ValidationError("Duplicate drug names are not allowed in one consultation.")
+            canonical_name = inventory_by_name.get(drug_name)
+            if canonical_name is None:
+                raise serializers.ValidationError(
+                    f"{item['drug_name'].strip()} is not available in inventory."
+                )
+            seen_drugs.add(drug_name)
+            normalized_items.append({**item, "drug_name": canonical_name})
+        return normalized_items
+
+    @transaction.atomic
+    def create(self, validated_data):
+        prescriptions_data = validated_data.pop("prescriptions")
+        validated_data.pop("patient_id")
+
+        patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
+
+        if patient.status != Patient.Status.DOCTOR:
+            raise serializers.ValidationError("This patient is no longer in the doctor stage.")
+
+        if patient.assigned_doctor_type != Patient.DoctorType.OPTICIAN:
+            raise serializers.ValidationError("This patient is not assigned to optician care.")
+
+        if OpticianConsultation.objects.filter(patient=patient).exists():
+            raise serializers.ValidationError("Optician consultation has already been recorded for this patient.")
+
+        if Consultation.objects.filter(patient=patient).exists():
+            raise serializers.ValidationError("Consultation has already been recorded for this patient.")
+
+        optician_consultation = OpticianConsultation.objects.create(patient=patient, **validated_data)
+        note_sections = [
+            ("Presenting Complaint", optician_consultation.presenting_complaint),
+            ("Ocular History", optician_consultation.ocular_history),
+            ("Visual Symptoms and Functional Impact", optician_consultation.visual_symptoms_functional_impact),
+            ("Past Ocular and Medical History", optician_consultation.past_ocular_medical_history),
+            ("Medication, Allergy, and Eye Drop History", optician_consultation.medication_allergy_eye_drop_history),
+            ("Examination and Vision Assessment", optician_consultation.examination_vision_assessment),
+            ("Impression / Diagnosis", optician_consultation.diagnosis),
+            ("Treatment Plan / Optical Advice", optician_consultation.treatment_plan),
+        ]
+        consultation_notes = "\n\n".join(
+            f"{title}:\n{content}" for title, content in note_sections if content.strip()
+        )
+
+        consultation = Consultation.objects.create(
+            patient=patient,
+            doctor_notes=consultation_notes,
+        )
+
+        for prescription_data in prescriptions_data:
+            Prescription.objects.create(consultation=consultation, **prescription_data)
+
+        patient.status = Patient.Status.PHARMACY
+        patient.pharmacy_started_at = timezone.now()
+        patient.save(update_fields=["status", "pharmacy_started_at"])
+
+        create_audit_log(
+            user=self.context["request"].user,
+            action="optician_consultation_completed",
+            patient=patient,
+            details={
+                "status": patient.status,
+                "prescription_count": len(prescriptions_data),
+            },
+        )
+        return optician_consultation
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["patient_id"] = instance.patient_id
+        data["status"] = instance.patient.status
+        data["prescription_count"] = instance.patient.consultation.prescriptions.count()
+        return data
+
+
+class DentalConsultationCreateSerializer(serializers.ModelSerializer):
+    patient_id = serializers.IntegerField(write_only=True)
+    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True)
+
+    class Meta:
+        model = DentalConsultation
+        fields = (
+            "id",
+            "patient_id",
+            "presenting_complaint",
+            "history_presenting_illness",
+            "oral_examination",
+            "oral_hygiene_practices",
+            "past_dental_history",
+            "medical_history",
+            "diagnosis",
+            "treatment_plan",
+            "prescriptions",
+            "created_at",
+        )
+        read_only_fields = ("id", "created_at")
+
+    def validate_patient_id(self, value):
+        try:
+            patient = Patient.objects.get(id=value)
+        except Patient.DoesNotExist as exc:
+            raise serializers.ValidationError("Patient not found.") from exc
+
+        if patient.status != Patient.Status.DOCTOR:
+            raise serializers.ValidationError(
+                "Only patients in the doctor stage can be processed by a dentist."
+            )
+
+        if patient.assigned_doctor_type != Patient.DoctorType.DENTAL:
+            raise serializers.ValidationError("This patient is not assigned to dental care.")
+
+        if hasattr(patient, "dental_consultation"):
+            raise serializers.ValidationError("Dental consultation has already been recorded for this patient.")
+
+        if hasattr(patient, "consultation"):
+            raise serializers.ValidationError("Consultation has already been recorded for this patient.")
+
+        self.context["patient"] = patient
+        return value
+
+    def validate_prescriptions(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one prescription is required.")
+        inventory_by_name = {
+            item.drug_name.strip().lower(): item.drug_name
+            for item in DrugInventory.objects.all()
+        }
+        normalized_items = []
+        seen_drugs = set()
+        for item in value:
+            drug_name = item["drug_name"].strip().lower()
+            if drug_name in seen_drugs:
+                raise serializers.ValidationError("Duplicate drug names are not allowed in one consultation.")
+            canonical_name = inventory_by_name.get(drug_name)
+            if canonical_name is None:
+                raise serializers.ValidationError(
+                    f"{item['drug_name'].strip()} is not available in inventory."
+                )
+            seen_drugs.add(drug_name)
+            normalized_items.append({**item, "drug_name": canonical_name})
+        return normalized_items
+
+    @transaction.atomic
+    def create(self, validated_data):
+        prescriptions_data = validated_data.pop("prescriptions")
+        validated_data.pop("patient_id")
+
+        patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
+
+        if patient.status != Patient.Status.DOCTOR:
+            raise serializers.ValidationError("This patient is no longer in the doctor stage.")
+
+        if patient.assigned_doctor_type != Patient.DoctorType.DENTAL:
+            raise serializers.ValidationError("This patient is not assigned to dental care.")
+
+        if DentalConsultation.objects.filter(patient=patient).exists():
+            raise serializers.ValidationError("Dental consultation has already been recorded for this patient.")
+
+        if Consultation.objects.filter(patient=patient).exists():
+            raise serializers.ValidationError("Consultation has already been recorded for this patient.")
+
+        dental_consultation = DentalConsultation.objects.create(patient=patient, **validated_data)
+        note_sections = [
+            ("Presenting Complaint", dental_consultation.presenting_complaint),
+            ("History of Presenting Illness", dental_consultation.history_presenting_illness),
+            ("Oral Examination", dental_consultation.oral_examination),
+            ("Oral Hygiene Practices", dental_consultation.oral_hygiene_practices),
+            ("Past Dental History", dental_consultation.past_dental_history),
+            ("Medical History", dental_consultation.medical_history),
+            ("Diagnosis", dental_consultation.diagnosis),
+            ("Treatment Plan", dental_consultation.treatment_plan),
+        ]
+        consultation_notes = "\n\n".join(
+            f"{title}:\n{content}" for title, content in note_sections if content.strip()
+        )
+
+        consultation = Consultation.objects.create(
+            patient=patient,
+            doctor_notes=consultation_notes,
+        )
+
+        for prescription_data in prescriptions_data:
+            Prescription.objects.create(consultation=consultation, **prescription_data)
+
+        patient.status = Patient.Status.PHARMACY
+        patient.pharmacy_started_at = timezone.now()
+        patient.save(update_fields=["status", "pharmacy_started_at"])
+
+        create_audit_log(
+            user=self.context["request"].user,
+            action="dental_consultation_completed",
+            patient=patient,
+            details={
+                "status": patient.status,
+                "prescription_count": len(prescriptions_data),
+            },
+        )
+        return dental_consultation
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["patient_id"] = instance.patient_id
+        data["status"] = instance.patient.status
+        data["prescription_count"] = instance.patient.consultation.prescriptions.count()
+        return data
 
 
 class PrescriptionDispenseSerializer(serializers.Serializer):

@@ -3,7 +3,7 @@ import "./PatientIntakeForm.css";
 import { createPatient } from "./api";
 import logo from "./kcf logo.jpeg";
 
-const REQUIRED_FIELDS = ["name", "age", "gender", "phone", "camp", "village", "nextOfKin"];
+const REQUIRED_FIELDS = ["name", "age", "gender", "phone", "camp", "location", "nextOfKin"];
 
 export default function PatientIntakeForm({ currentUser, onLogout }) {
   const [form, setForm] = useState({
@@ -12,7 +12,7 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
     gender: "",
     phone: "",
     camp: "",
-    village: "",
+    location: "",
     nextOfKin: "",
     hasChild: false,
     childName: "",
@@ -61,7 +61,7 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
       gender: form.gender,
       phone: form.phone,
       camp: form.camp,
-      village: form.village,
+      location: form.location,
       next_of_kin: form.nextOfKin,
       has_child: form.hasChild,
       child_name: form.hasChild ? form.childName : "",
@@ -78,7 +78,7 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
           gender: "",
           phone: "",
           camp: "",
-          village: "",
+          location: "",
           nextOfKin: "",
           hasChild: false,
           childName: "",
@@ -151,8 +151,8 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
 
           <div className="kcf-row">
             <label>
-              Village <span>*</span>
-              <input value={form.village} onChange={handleChange("village")} type="text" placeholder="Village" required />
+              Location <span>*</span>
+              <input value={form.location} onChange={handleChange("location")} type="text" placeholder="Location" required />
             </label>
             <label>
               Next of Kin <span>*</span>

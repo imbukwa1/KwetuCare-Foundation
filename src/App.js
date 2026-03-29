@@ -2,8 +2,14 @@ import './App.css';
 import { useEffect, useState } from 'react';
 import AdminDashboardPage from './AdminDashboardPage';
 import AuthPage from './AuthPage';
+import DentalConsultationPage from './DentalConsultationPage';
 import DoctorConsultationPage from './DoctorConsultationPage';
+import GynecologyConsultationPage from './GynecologyConsultationPage';
+import NutritionConsultationPage from './NutritionConsultationPage';
+import ObstetricConsultationPage from './ObstetricConsultationPage';
+import OpticianConsultationPage from './OpticianConsultationPage';
 import PatientIntakeForm from './PatientIntakeForm';
+import PediatricConsultationPage from './PediatricConsultationPage';
 import PharmacyPage from './PharmacyPage';
 import TriagePage from './TriagePage';
 import { clearTokens, fetchCurrentUser, getStoredAccessToken } from './api';
@@ -11,7 +17,13 @@ import { clearTokens, fetchCurrentUser, getStoredAccessToken } from './api';
 const ROLE_PATHS = {
   registration: '/registration',
   nurse: '/triage',
-  doctor: '/doctor',
+  general_doctor: '/doctor',
+  pediatrician: '/pediatric',
+  gynecologist: '/gynecology',
+  obstetrician: '/obstetrics',
+  nutritionist: '/nutrition',
+  dental: '/dental',
+  optician: '/optician',
   pharmacist: '/pharmacy',
   admin: '/admin',
 };
@@ -56,8 +68,20 @@ function renderDashboard(user, onLogout) {
       return <PatientIntakeForm currentUser={user} onLogout={onLogout} />;
     case 'nurse':
       return <TriagePage currentUser={user} onLogout={onLogout} />;
-    case 'doctor':
+    case 'general_doctor':
       return <DoctorConsultationPage currentUser={user} onLogout={onLogout} />;
+    case 'gynecologist':
+      return <GynecologyConsultationPage currentUser={user} onLogout={onLogout} />;
+    case 'obstetrician':
+      return <ObstetricConsultationPage currentUser={user} onLogout={onLogout} />;
+    case 'nutritionist':
+      return <NutritionConsultationPage currentUser={user} onLogout={onLogout} />;
+    case 'dental':
+      return <DentalConsultationPage currentUser={user} onLogout={onLogout} />;
+    case 'optician':
+      return <OpticianConsultationPage currentUser={user} onLogout={onLogout} />;
+    case 'pediatrician':
+      return <PediatricConsultationPage currentUser={user} onLogout={onLogout} />;
     case 'pharmacist':
       return <PharmacyPage currentUser={user} onLogout={onLogout} />;
     case 'admin':

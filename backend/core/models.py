@@ -116,11 +116,185 @@ class Consultation(models.Model):
         on_delete=models.CASCADE,
         related_name="consultation",
     )
-    doctor_notes = models.TextField()
+    # Health Information
+    health_conditions = models.JSONField(default=list, blank=True)  # List of conditions
+    on_medication = models.CharField(max_length=10, blank=True)  # "yes" or "no"
+    medication_details = models.TextField(blank=True)
+    
+    # History of Presenting Illness
+    illness_onset = models.TextField(blank=True)
+    illness_severity = models.CharField(max_length=50, blank=True)
+    illness_location = models.TextField(blank=True)
+    associated_symptoms = models.TextField(blank=True)
+    
+    # Past Medical History
+    chronic_illnesses = models.TextField(blank=True)
+    surgeries = models.JSONField(default=list, blank=True)  # List of surgical history
+    hospitalizations = models.JSONField(default=list, blank=True)  # List of hospitalizations
+    significant_infections = models.TextField(blank=True)
+    
+    # Family History
+    family_history = models.TextField(blank=True)
+    
+    # Medications and Allergies
+    current_medications = models.TextField(blank=True)
+    drug_allergies = models.TextField(blank=True)
+    food_allergies = models.TextField(blank=True)
+    
+    # Review of Systems
+    systems_heent = models.TextField(blank=True)
+    systems_cardiovascular = models.TextField(blank=True)
+    systems_respiratory = models.TextField(blank=True)
+    systems_gastrointestinal = models.TextField(blank=True)
+    systems_musculoskeletal = models.TextField(blank=True)
+    systems_neurological = models.TextField(blank=True)
+    
+    # Diagnosis and Management
+    diagnosis = models.TextField(blank=True)  # Required for new consultations but blank for existing
+    doctor_notes = models.TextField(blank=True)
+    recommendations = models.TextField(blank=True)
+    follow_up_instructions = models.TextField(blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Consultation for {self.patient.reg_no}"
+
+
+class PediatricConsultation(models.Model):
+    patient = models.OneToOneField(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="pediatric_consultation",
+    )
+    presenting_complaint = models.TextField()
+    history_presenting_illness = models.TextField()
+    past_medical_history = models.TextField()
+    prenatal_antenatal_history = models.TextField()
+    birth_history = models.TextField()
+    nutritional_history = models.TextField()
+    growth_development_history = models.TextField()
+    family_social_history = models.TextField()
+    diagnosis = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Pediatric Consultation for {self.patient.reg_no}"
+
+
+class GynecologyConsultation(models.Model):
+    patient = models.OneToOneField(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="gynecology_consultation",
+    )
+    presenting_complaints = models.TextField()
+    history_presenting_complaints = models.TextField()
+    antenatal_history = models.TextField()
+    obstetric_history = models.TextField()
+    gynecological_history = models.TextField()
+    sexual_reproductive_history = models.TextField()
+    past_medical_surgical_family_history = models.TextField()
+    examination_review_systems = models.TextField()
+    diagnosis = models.TextField()
+    treatment_plan = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Gynecology Consultation for {self.patient.reg_no}"
+
+
+class ObstetricConsultation(models.Model):
+    patient = models.OneToOneField(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="obstetric_consultation",
+    )
+    presenting_complaints = models.TextField()
+    history_presenting_complaints = models.TextField()
+    antenatal_history = models.TextField()
+    obstetric_history = models.TextField()
+    gynecological_history = models.TextField()
+    sexual_reproductive_history = models.TextField()
+    past_medical_surgical_family_history = models.TextField()
+    examination_review_systems = models.TextField()
+    diagnosis = models.TextField()
+    treatment_plan = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Obstetric Consultation for {self.patient.reg_no}"
+
+
+class NutritionConsultation(models.Model):
+    class NutritionDiagnosis(models.TextChoices):
+        UNDERNUTRITION = "undernutrition", "Undernutrition"
+        OVERNUTRITION = "overnutrition", "Overnutrition"
+        BALANCED = "balanced", "Balanced"
+
+    class RiskLevel(models.TextChoices):
+        LOW = "low", "Low"
+        MODERATE = "moderate", "Moderate"
+        HIGH = "high", "High"
+
+    patient = models.OneToOneField(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="nutrition_consultation",
+    )
+    presenting_complaint = models.TextField()
+    dietary_history = models.TextField()
+    nutritional_assessment = models.TextField()
+    medical_health_conditions = models.TextField()
+    child_feeding_history = models.TextField(blank=True)
+    lifestyle_assessment = models.TextField()
+    nutrition_diagnosis = models.CharField(max_length=20, choices=NutritionDiagnosis.choices)
+    risk_level = models.CharField(max_length=20, choices=RiskLevel.choices)
+    nutrition_plan = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Nutrition Consultation for {self.patient.reg_no}"
+
+
+class OpticianConsultation(models.Model):
+    patient = models.OneToOneField(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="optician_consultation",
+    )
+    presenting_complaint = models.TextField()
+    ocular_history = models.TextField()
+    visual_symptoms_functional_impact = models.TextField()
+    past_ocular_medical_history = models.TextField()
+    medication_allergy_eye_drop_history = models.TextField()
+    examination_vision_assessment = models.TextField()
+    diagnosis = models.TextField()
+    treatment_plan = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Optician Consultation for {self.patient.reg_no}"
+
+
+class DentalConsultation(models.Model):
+    patient = models.OneToOneField(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="dental_consultation",
+    )
+    presenting_complaint = models.TextField()
+    history_presenting_illness = models.TextField()
+    oral_examination = models.TextField()
+    oral_hygiene_practices = models.TextField()
+    past_dental_history = models.TextField()
+    medical_history = models.TextField()
+    diagnosis = models.TextField()
+    treatment_plan = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Dental Consultation for {self.patient.reg_no}"
 
 
 class Prescription(models.Model):

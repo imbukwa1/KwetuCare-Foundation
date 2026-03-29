@@ -2,6 +2,17 @@ from django.conf import settings
 from rest_framework.permissions import BasePermission
 
 
+CONSULTATION_ROLES = {
+    "general_doctor",
+    "pediatrician",
+    "gynecologist",
+    "obstetrician",
+    "nutritionist",
+    "dental",
+    "optician",
+}
+
+
 class IsApprovedUser(BasePermission):
     message = "Your account is pending admin approval."
 
@@ -70,20 +81,128 @@ class IsNurseUser(BasePermission):
 
 
 class IsDoctorUser(BasePermission):
-    message = "Only approved doctors can perform this action."
+    message = "Only approved doctors and specialists can perform this action."
 
     def has_permission(self, request, view):
         if settings.BYPASS_USER_APPROVAL:
             return bool(
                 request.user
                 and request.user.is_authenticated
-                and request.user.role == "doctor"
+                and request.user.role in CONSULTATION_ROLES
             )
         return bool(
             request.user
             and request.user.is_authenticated
             and request.user.is_approved
-            and request.user.role == "doctor"
+            and request.user.role in CONSULTATION_ROLES
+        )
+
+
+class IsPediatricianUser(BasePermission):
+    message = "Only approved pediatricians can perform this action."
+
+    def has_permission(self, request, view):
+        if settings.BYPASS_USER_APPROVAL:
+            return bool(
+                request.user
+                and request.user.is_authenticated
+                and request.user.role == "pediatrician"
+            )
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_approved
+            and request.user.role == "pediatrician"
+        )
+
+
+class IsGynecologistUser(BasePermission):
+    message = "Only approved gynecologists can perform this action."
+
+    def has_permission(self, request, view):
+        if settings.BYPASS_USER_APPROVAL:
+            return bool(
+                request.user
+                and request.user.is_authenticated
+                and request.user.role == "gynecologist"
+            )
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_approved
+            and request.user.role == "gynecologist"
+        )
+
+
+class IsObstetricianUser(BasePermission):
+    message = "Only approved obstetricians can perform this action."
+
+    def has_permission(self, request, view):
+        if settings.BYPASS_USER_APPROVAL:
+            return bool(
+                request.user
+                and request.user.is_authenticated
+                and request.user.role == "obstetrician"
+            )
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_approved
+            and request.user.role == "obstetrician"
+        )
+
+
+class IsNutritionistUser(BasePermission):
+    message = "Only approved nutritionists can perform this action."
+
+    def has_permission(self, request, view):
+        if settings.BYPASS_USER_APPROVAL:
+            return bool(
+                request.user
+                and request.user.is_authenticated
+                and request.user.role == "nutritionist"
+            )
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_approved
+            and request.user.role == "nutritionist"
+        )
+
+
+class IsOpticianUser(BasePermission):
+    message = "Only approved opticians can perform this action."
+
+    def has_permission(self, request, view):
+        if settings.BYPASS_USER_APPROVAL:
+            return bool(
+                request.user
+                and request.user.is_authenticated
+                and request.user.role == "optician"
+            )
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_approved
+            and request.user.role == "optician"
+        )
+
+
+class IsDentalUser(BasePermission):
+    message = "Only approved dentists can perform this action."
+
+    def has_permission(self, request, view):
+        if settings.BYPASS_USER_APPROVAL:
+            return bool(
+                request.user
+                and request.user.is_authenticated
+                and request.user.role == "dental"
+            )
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_approved
+            and request.user.role == "dental"
         )
 
 
@@ -124,10 +243,10 @@ class IsAdminOrPharmacistUser(BasePermission):
 
 
 class IsInventoryViewer(BasePermission):
-    message = "Only approved admins, doctors, or pharmacists can view inventory."
+    message = "Only approved admins, consultation roles, or pharmacists can view inventory."
 
     def has_permission(self, request, view):
-        allowed_roles = {"admin", "doctor", "pharmacist"}
+        allowed_roles = {"admin", "pharmacist", *CONSULTATION_ROLES}
         if settings.BYPASS_USER_APPROVAL:
             return bool(
                 request.user

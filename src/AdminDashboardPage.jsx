@@ -156,7 +156,7 @@ function PatientSearchPanel({ patients, search, setSearch }) {
           className="admin-input"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search by name, reg no, phone, village"
+          placeholder="Search by name, reg no, phone, location"
         />
       </div>
       <table className="data-table">

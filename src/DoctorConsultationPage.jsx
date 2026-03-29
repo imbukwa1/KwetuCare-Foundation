@@ -68,12 +68,91 @@ function PatientList({ patients, onStart }) {
 
 function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
   const initialPrescribing = [{ drugName: "", dosage: "", quantity: "", frequency: "", status: "pending" }];
+  const initialSurgeries = [{ year: "", indication: "", surgeon: "", complications: "" }];
+  const initialHospitalizations = [{ reason: "", outcome: "", year: "" }];
+  
+  // Health Information State
+  const [selectedConditions, setSelectedConditions] = useState([]);
+  const [onMedication, setOnMedication] = useState("no");
+  const [medicationDetails, setMedicationDetails] = useState("");
+  
+  // History of Presenting Illness
+  const [illnessOnset, setIllnessOnset] = useState("");
+  const [illnessSeverity, setIllnessSeverity] = useState("moderate");
+  const [illnessLocation, setIllnessLocation] = useState("");
+  const [associatedSymptoms, setAssociatedSymptoms] = useState("");
+  
+  // Past Medical History
+  const [chronicIllnesses, setChronicIllnesses] = useState("");
+  const [surgeries, setSurgeries] = useState(initialSurgeries);
+  const [hospitalizations, setHospitalizations] = useState(initialHospitalizations);
+  const [significantInfections, setSignificantInfections] = useState("");
+  
+  // Family History
+  const [familyHistory, setFamilyHistory] = useState("");
+  
+  // Medications and Allergies
+  const [currentMedications, setCurrentMedications] = useState("");
+  const [drugAllergies, setDrugAllergies] = useState("");
+  const [foodAllergies, setFoodAllergies] = useState("");
+  
+  // Review of Systems
+  const [systemsHeent, setSystemsHeent] = useState("");
+  const [systemsCardiovascular, setSystemsCardiovascular] = useState("");
+  const [systemsRespiratory, setSystemsRespiratory] = useState("");
+  const [systemsGastrointestinal, setSystemsGastrointestinal] = useState("");
+  const [systemsMusculoskeletal, setSystemsMusculoskeletal] = useState("");
+  const [systemsNeurological, setSystemsNeurological] = useState("");
+  
+  // Diagnosis and Management
+  const [diagnosis, setDiagnosis] = useState("");
   const [doctorNotes, setDoctorNotes] = useState("");
   const [prescriptions, setPrescriptions] = useState(initialPrescribing);
+  const [recommendations, setRecommendations] = useState("");
+  const [followUpInstructions, setFollowUpInstructions] = useState("");
+  
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const hasPatient = !!patient;
+
+  const toggleCondition = (condition) => {
+    setSelectedConditions((prev) => 
+      prev.includes(condition) ? prev.filter(c => c !== condition) : [...prev, condition]
+    );
+  };
+
+  const updateSurgeryField = (index, field, value) => {
+    setSurgeries((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  const addSurgery = () => {
+    setSurgeries((prev) => [...prev, { year: "", indication: "", surgeon: "", complications: "" }]);
+  };
+
+  const removeSurgery = (index) => {
+    setSurgeries((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
+  };
+
+  const updateHospitalizationField = (index, field, value) => {
+    setHospitalizations((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  const addHospitalization = () => {
+    setHospitalizations((prev) => [...prev, { reason: "", outcome: "", year: "" }]);
+  };
+
+  const removeHospitalization = (index) => {
+    setHospitalizations((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
+  };
 
   const isPrescriptionValid = useMemo(() => {
     return prescriptions.every(
@@ -85,7 +164,7 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
     );
   }, [prescriptions]);
 
-  const isFormValid = hasPatient && doctorNotes.trim() !== "" && isPrescriptionValid;
+  const isFormValid = hasPatient && diagnosis.trim() !== "" && isPrescriptionValid;
 
   const updatePrescriptionField = (index, field, value) => {
     setPrescriptions((prev) => {
@@ -106,7 +185,7 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
   const submit = (event) => {
     event.preventDefault();
     if (!isFormValid) {
-      setError("Please complete doctor notes and all prescriptions.");
+      setError("Please complete the clinical diagnosis and all prescriptions.");
       return;
     }
 
@@ -116,6 +195,38 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
     Promise.resolve(
       onSubmit({
         patient,
+        healthInformation: {
+          conditions: selectedConditions,
+          onMedication,
+          medicationDetails,
+        },
+        historyOfPresentingIllness: {
+          onset: illnessOnset,
+          severity: illnessSeverity,
+          location: illnessLocation,
+          associatedSymptoms,
+        },
+        pastMedicalHistory: {
+          chronicIllnesses,
+          surgeries,
+          hospitalizations,
+          significantInfections,
+        },
+        familyHistory,
+        medicationsAndAllergies: {
+          currentMedications,
+          drugAllergies,
+          foodAllergies,
+        },
+        reviewOfSystems: {
+          heent: systemsHeent,
+          cardiovascular: systemsCardiovascular,
+          respiratory: systemsRespiratory,
+          gastrointestinal: systemsGastrointestinal,
+          musculoskeletal: systemsMusculoskeletal,
+          neurological: systemsNeurological,
+        },
+        diagnosis,
         doctorNotes,
         prescriptions: prescriptions.map((item) => ({
           drug_name: item.drugName.trim(),
@@ -124,11 +235,38 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
           frequency: item.frequency,
           status: item.status,
         })),
+        recommendations,
+        followUpInstructions,
       })
     )
       .then(() => {
+        // Reset all fields
+        setSelectedConditions([]);
+        setOnMedication("no");
+        setMedicationDetails("");
+        setIllnessOnset("");
+        setIllnessSeverity("moderate");
+        setIllnessLocation("");
+        setAssociatedSymptoms("");
+        setChronicIllnesses("");
+        setSurgeries([{ year: "", indication: "", surgeon: "", complications: "" }]);
+        setHospitalizations([{ reason: "", outcome: "", year: "" }]);
+        setSignificantInfections("");
+        setFamilyHistory("");
+        setCurrentMedications("");
+        setDrugAllergies("");
+        setFoodAllergies("");
+        setSystemsHeent("");
+        setSystemsCardiovascular("");
+        setSystemsRespiratory("");
+        setSystemsGastrointestinal("");
+        setSystemsMusculoskeletal("");
+        setSystemsNeurological("");
+        setDiagnosis("");
         setDoctorNotes("");
-        setPrescriptions(initialPrescribing);
+        setPrescriptions([{ drugName: "", dosage: "", quantity: "", frequency: "", status: "pending" }]);
+        setRecommendations("");
+        setFollowUpInstructions("");
       })
       .catch((submitError) => {
         setError(submitError.message);
@@ -224,18 +362,318 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
             </div>
           )}
 
+          {/* Health Information Section */}
           <div className="doc-section">
-            <h4>Doctor Notes *</h4>
+            <h4>1. Health Information</h4>
+            <div className="doc-subsection">
+              <label>Select any existing health conditions:</label>
+              <div className="checkbox-group">
+                {["Diabetes", "Hypertension (High Blood Pressure)", "Eye Problems", "Kidney Disease", "Heart Disease"].map((condition) => (
+                  <label key={condition} className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={selectedConditions.includes(condition)}
+                      onChange={() => toggleCondition(condition)}
+                    />
+                    {condition}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="doc-subsection">
+              <label>
+                Are you on any medication?
+                <select value={onMedication} onChange={(e) => setOnMedication(e.target.value)}>
+                  <option value="no">No</option>
+                  <option value="yes">Yes</option>
+                </select>
+              </label>
+              {onMedication === "yes" && (
+                <label>
+                  Please specify medications:
+                  <textarea
+                    value={medicationDetails}
+                    onChange={(e) => setMedicationDetails(e.target.value)}
+                    placeholder="List medications, dosages, and frequency"
+                    rows={2}
+                  />
+                </label>
+              )}
+            </div>
+          </div>
+
+          {/* History of Presenting Illness */}
+          <div className="doc-section">
+            <h4>2. History of Presenting Illness</h4>
+            <label>
+              Onset (when did symptoms start?)
+              <input
+                type="text"
+                value={illnessOnset}
+                onChange={(e) => setIllnessOnset(e.target.value)}
+                placeholder="e.g., 2 weeks ago, sudden onset"
+              />
+            </label>
+            <label>
+              Severity
+              <select value={illnessSeverity} onChange={(e) => setIllnessSeverity(e.target.value)}>
+                <option value="mild">Mild</option>
+                <option value="moderate">Moderate</option>
+                <option value="severe">Severe</option>
+              </select>
+            </label>
+            <label>
+              Location
+              <input
+                type="text"
+                value={illnessLocation}
+                onChange={(e) => setIllnessLocation(e.target.value)}
+                placeholder="Where does the patient feel it?"
+              />
+            </label>
+            <label>
+              Associated Symptoms
+              <textarea
+                value={associatedSymptoms}
+                onChange={(e) => setAssociatedSymptoms(e.target.value)}
+                placeholder="Detailed chronological narrative including associated symptoms"
+                rows={3}
+              />
+            </label>
+          </div>
+
+          {/* Past Medical History */}
+          <div className="doc-section">
+            <h4>3. Past Medical and Surgical History</h4>
+            <label>
+              Chronic Illnesses
+              <textarea
+                value={chronicIllnesses}
+                onChange={(e) => setChronicIllnesses(e.target.value)}
+                placeholder="List any chronic illnesses"
+                rows={2}
+              />
+            </label>
+
+            <div className="doc-subsection">
+              <label>Previous Surgeries/Procedures:</label>
+              {surgeries.map((surgery, index) => (
+                <div key={index} className="history-row">
+                  <input
+                    type="text"
+                    value={surgery.year}
+                    onChange={(e) => updateSurgeryField(index, "year", e.target.value)}
+                    placeholder="Year"
+                  />
+                  <input
+                    type="text"
+                    value={surgery.indication}
+                    onChange={(e) => updateSurgeryField(index, "indication", e.target.value)}
+                    placeholder="Indication"
+                  />
+                  <input
+                    type="text"
+                    value={surgery.surgeon}
+                    onChange={(e) => updateSurgeryField(index, "surgeon", e.target.value)}
+                    placeholder="Surgeon"
+                  />
+                  <input
+                    type="text"
+                    value={surgery.complications}
+                    onChange={(e) => updateSurgeryField(index, "complications", e.target.value)}
+                    placeholder="Complications"
+                  />
+                  {surgeries.length > 1 && (
+                    <button type="button" className="btn-remove" onClick={() => removeSurgery(index)}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button type="button" className="btn-muted" onClick={addSurgery}>
+                + Add Surgery
+              </button>
+            </div>
+
+            <div className="doc-subsection">
+              <label>Hospitalizations:</label>
+              {hospitalizations.map((hosp, index) => (
+                <div key={index} className="history-row">
+                  <input
+                    type="text"
+                    value={hosp.reason}
+                    onChange={(e) => updateHospitalizationField(index, "reason", e.target.value)}
+                    placeholder="Reason for hospitalization"
+                  />
+                  <input
+                    type="text"
+                    value={hosp.outcome}
+                    onChange={(e) => updateHospitalizationField(index, "outcome", e.target.value)}
+                    placeholder="Outcome"
+                  />
+                  <input
+                    type="text"
+                    value={hosp.year}
+                    onChange={(e) => updateHospitalizationField(index, "year", e.target.value)}
+                    placeholder="Year"
+                  />
+                  {hospitalizations.length > 1 && (
+                    <button type="button" className="btn-remove" onClick={() => removeHospitalization(index)}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button type="button" className="btn-muted" onClick={addHospitalization}>
+                + Add Hospitalization
+              </button>
+            </div>
+
+            <label>
+              Significant Infections
+              <textarea
+                value={significantInfections}
+                onChange={(e) => setSignificantInfections(e.target.value)}
+                placeholder="List any significant infections"
+                rows={2}
+              />
+            </label>
+          </div>
+
+          {/* Family History */}
+          <div className="doc-section">
+            <h4>4. Family History</h4>
+            <label>
+              Any relevant family diseases or conditions
+              <textarea
+                value={familyHistory}
+                onChange={(e) => setFamilyHistory(e.target.value)}
+                placeholder="e.g., Diabetes in parents, cancer in siblings"
+                rows={2}
+              />
+            </label>
+          </div>
+
+          {/* Medications and Allergies */}
+          <div className="doc-section">
+            <h4>5. Medications and Allergies</h4>
+            <label>
+              Current Medications
+              <textarea
+                value={currentMedications}
+                onChange={(e) => setCurrentMedications(e.target.value)}
+                placeholder="List all current medications with dosages"
+                rows={2}
+              />
+            </label>
+            <label>
+              Known Drug Allergies
+              <input
+                type="text"
+                value={drugAllergies}
+                onChange={(e) => setDrugAllergies(e.target.value)}
+                placeholder="List any drug allergies"
+              />
+            </label>
+            <label>
+              Known Food Allergies
+              <input
+                type="text"
+                value={foodAllergies}
+                onChange={(e) => setFoodAllergies(e.target.value)}
+                placeholder="List any food allergies"
+              />
+            </label>
+          </div>
+
+          {/* Review of Systems */}
+          <div className="doc-section">
+            <h4>6. Review of Systems / Systemic Examination</h4>
+            <label>
+              HEENT (Head, Eyes, Ears, Nose, Throat)
+              <textarea
+                value={systemsHeent}
+                onChange={(e) => setSystemsHeent(e.target.value)}
+                placeholder="Findings and observations"
+                rows={2}
+              />
+            </label>
+            <label>
+              Cardiovascular System
+              <textarea
+                value={systemsCardiovascular}
+                onChange={(e) => setSystemsCardiovascular(e.target.value)}
+                placeholder="Findings and observations"
+                rows={2}
+              />
+            </label>
+            <label>
+              Respiratory System
+              <textarea
+                value={systemsRespiratory}
+                onChange={(e) => setSystemsRespiratory(e.target.value)}
+                placeholder="Findings and observations"
+                rows={2}
+              />
+            </label>
+            <label>
+              Gastrointestinal
+              <textarea
+                value={systemsGastrointestinal}
+                onChange={(e) => setSystemsGastrointestinal(e.target.value)}
+                placeholder="Findings and observations"
+                rows={2}
+              />
+            </label>
+            <label>
+              Musculoskeletal
+              <textarea
+                value={systemsMusculoskeletal}
+                onChange={(e) => setSystemsMusculoskeletal(e.target.value)}
+                placeholder="Findings and observations"
+                rows={2}
+              />
+            </label>
+            <label>
+              Neurological
+              <textarea
+                value={systemsNeurological}
+                onChange={(e) => setSystemsNeurological(e.target.value)}
+                placeholder="Findings and observations"
+                rows={2}
+              />
+            </label>
+          </div>
+
+          {/* Impression and Diagnosis */}
+          <div className="doc-section">
+            <h4>7. Impression / Diagnosis *</h4>
             <textarea
-              value={doctorNotes}
-              onChange={(event) => setDoctorNotes(event.target.value)}
-              rows={4}
-              placeholder="Enter assessment and direction"
+              value={diagnosis}
+              onChange={(e) => setDiagnosis(e.target.value)}
+              rows={2}
+              placeholder="Clinical diagnosis based on findings"
             />
           </div>
 
+          {/* Additional Notes */}
           <div className="doc-section">
-            <h4>Prescription</h4>
+            <h4>Doctor Notes</h4>
+            <textarea
+              value={doctorNotes}
+              onChange={(event) => setDoctorNotes(event.target.value)}
+              rows={2}
+              placeholder="Any additional medical notes"
+            />
+          </div>
+
+          {/* Treatment and Management Plan */}
+          <div className="doc-section">
+            <h4>8. Treatment and Management Plan</h4>
+            <label>
+              Medications (Prescriptions)
+              <p style={{ fontSize: "0.9em", color: "#666", marginTop: "0.5em" }}>Add all prescribed medications below:</p>
+            </label>
             {prescriptions.map((prescription, index) => (
               <div className="prescription-row" key={index}>
                 <input
@@ -275,6 +713,26 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
             <button type="button" className="btn-muted" onClick={addPrescription}>
               + Add Drug
             </button>
+
+            <label style={{ marginTop: "1em" }}>
+              Recommendations
+              <textarea
+                value={recommendations}
+                onChange={(e) => setRecommendations(e.target.value)}
+                placeholder="e.g., Rest, diet changes, lifestyle modifications"
+                rows={2}
+              />
+            </label>
+
+            <label>
+              Follow-up Instructions
+              <textarea
+                value={followUpInstructions}
+                onChange={(e) => setFollowUpInstructions(e.target.value)}
+                placeholder="e.g., Return for review in 1 week, Monitor blood pressure daily"
+                rows={2}
+              />
+            </label>
           </div>
 
           {error && <p className="doc-error">{error}</p>}
@@ -354,7 +812,16 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
   const handleSubmit = useCallback(async (data) => {
     await submitConsultation({
       patient_id: data.patient.id,
-      doctor_notes: data.doctorNotes,
+      healthInformation: data.healthInformation,
+      historyOfPresentingIllness: data.historyOfPresentingIllness,
+      pastMedicalHistory: data.pastMedicalHistory,
+      familyHistory: data.familyHistory,
+      medicationsAndAllergies: data.medicationsAndAllergies,
+      reviewOfSystems: data.reviewOfSystems,
+      diagnosis: data.diagnosis,
+      doctorNotes: data.doctorNotes,
+      recommendations: data.recommendations,
+      followUpInstructions: data.followUpInstructions,
       prescriptions: data.prescriptions,
     });
 

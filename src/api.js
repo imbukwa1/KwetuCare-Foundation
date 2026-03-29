@@ -156,6 +156,48 @@ export function submitConsultation(payload) {
   });
 }
 
+export function submitPediatricConsultation(payload) {
+  return apiRequest("/pediatric-consultations/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function submitGynecologyConsultation(payload) {
+  return apiRequest("/gynecology-consultations/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function submitObstetricConsultation(payload) {
+  return apiRequest("/obstetric-consultations/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function submitNutritionConsultation(payload) {
+  return apiRequest("/nutrition-consultations/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function submitOpticianConsultation(payload) {
+  return apiRequest("/optician-consultations/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function submitDentalConsultation(payload) {
+  return apiRequest("/dental-consultations/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchPatientDetail(patientId) {
   return apiRequest(`/patients/${patientId}/`);
 }

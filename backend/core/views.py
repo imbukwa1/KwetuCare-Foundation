@@ -14,17 +14,29 @@ from .permissions import (
     IsAdminUserRole,
     IsAdminOrPharmacistUser,
     IsApprovedUser,
+    IsDentalUser,
     IsDoctorUser,
+    IsGynecologistUser,
     IsInventoryViewer,
     IsNurseUser,
+    IsNutritionistUser,
+    IsObstetricianUser,
+    IsOpticianUser,
+    IsPediatricianUser,
     IsPharmacistUser,
     IsRegistrationOfficer,
 )
 from .serializers import (
     ConsultationCreateSerializer,
+    DentalConsultationCreateSerializer,
     DrugInventorySerializer,
+    GynecologyConsultationCreateSerializer,
     InventoryAdjustSerializer,
+    ObstetricConsultationCreateSerializer,
+    NutritionConsultationCreateSerializer,
+    OpticianConsultationCreateSerializer,
     LoginSerializer,
+    PediatricConsultationCreateSerializer,
     PharmacyDispenseSerializer,
     PatientRegistrationSerializer,
     PatientListSerializer,
@@ -155,6 +167,36 @@ class TriageCreateView(generics.CreateAPIView):
 class ConsultationCreateView(generics.CreateAPIView):
     serializer_class = ConsultationCreateSerializer
     permission_classes = [permissions.IsAuthenticated, IsDoctorUser]
+
+
+class DentalConsultationCreateView(generics.CreateAPIView):
+    serializer_class = DentalConsultationCreateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsDentalUser]
+
+
+class PediatricConsultationCreateView(generics.CreateAPIView):
+    serializer_class = PediatricConsultationCreateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsPediatricianUser]
+
+
+class GynecologyConsultationCreateView(generics.CreateAPIView):
+    serializer_class = GynecologyConsultationCreateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsGynecologistUser]
+
+
+class ObstetricConsultationCreateView(generics.CreateAPIView):
+    serializer_class = ObstetricConsultationCreateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsObstetricianUser]
+
+
+class NutritionConsultationCreateView(generics.CreateAPIView):
+    serializer_class = NutritionConsultationCreateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsNutritionistUser]
+
+
+class OpticianConsultationCreateView(generics.CreateAPIView):
+    serializer_class = OpticianConsultationCreateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOpticianUser]
 
 
 class PharmacyDispenseView(generics.GenericAPIView):

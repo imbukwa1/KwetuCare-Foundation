@@ -1,7 +1,21 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import AuditLog, Consultation, DrugInventory, Patient, Prescription, Triage, User
+from .models import (
+    AuditLog,
+    Consultation,
+    DentalConsultation,
+    DrugInventory,
+    GynecologyConsultation,
+    NutritionConsultation,
+    ObstetricConsultation,
+    OpticianConsultation,
+    Patient,
+    PediatricConsultation,
+    Prescription,
+    Triage,
+    User,
+)
 
 
 @admin.register(User)
@@ -19,18 +33,64 @@ class UserAdmin(DjangoUserAdmin):
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
     list_display = ("reg_no", "name", "phone", "camp", "priority", "status", "created_at")
-    search_fields = ("reg_no", "name", "phone", "camp", "village")
+    search_fields = ("reg_no", "name", "phone", "camp", "location")
     list_filter = ("status", "priority", "gender", "camp", "created_at")
 
 
 @admin.register(Triage)
 class TriageAdmin(admin.ModelAdmin):
-    list_display = ("patient", "temperature", "weight", "heart_rate", "created_at")
+    list_display = (
+        "patient",
+        "temperature",
+        "weight",
+        "height",
+        "bmi",
+        "heart_rate",
+        "respiratory_rate",
+        "spo2",
+        "created_at",
+    )
     search_fields = ("patient__reg_no", "patient__name")
 
 
 @admin.register(Consultation)
 class ConsultationAdmin(admin.ModelAdmin):
+    list_display = ("patient", "created_at")
+    search_fields = ("patient__reg_no", "patient__name")
+
+
+@admin.register(PediatricConsultation)
+class PediatricConsultationAdmin(admin.ModelAdmin):
+    list_display = ("patient", "created_at")
+    search_fields = ("patient__reg_no", "patient__name")
+
+
+@admin.register(GynecologyConsultation)
+class GynecologyConsultationAdmin(admin.ModelAdmin):
+    list_display = ("patient", "created_at")
+    search_fields = ("patient__reg_no", "patient__name")
+
+
+@admin.register(ObstetricConsultation)
+class ObstetricConsultationAdmin(admin.ModelAdmin):
+    list_display = ("patient", "created_at")
+    search_fields = ("patient__reg_no", "patient__name")
+
+
+@admin.register(NutritionConsultation)
+class NutritionConsultationAdmin(admin.ModelAdmin):
+    list_display = ("patient", "nutrition_diagnosis", "risk_level", "created_at")
+    search_fields = ("patient__reg_no", "patient__name")
+
+
+@admin.register(OpticianConsultation)
+class OpticianConsultationAdmin(admin.ModelAdmin):
+    list_display = ("patient", "created_at")
+    search_fields = ("patient__reg_no", "patient__name")
+
+
+@admin.register(DentalConsultation)
+class DentalConsultationAdmin(admin.ModelAdmin):
     list_display = ("patient", "created_at")
     search_fields = ("patient__reg_no", "patient__name")
 
