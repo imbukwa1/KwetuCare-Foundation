@@ -4,6 +4,16 @@ import "./TriagePage.css";
 import { fetchQueue, submitTriage } from "./api";
 import useHybridDataSync from "./useHybridDataSync";
 
+const DOCTOR_TYPE_OPTIONS = [
+  { value: "general_doctor", label: "General Doctor" },
+  { value: "pediatrician", label: "Pediatrician" },
+  { value: "gynecologist", label: "Gynecologist" },
+  { value: "obstetrician", label: "Obstetrician" },
+  { value: "nutritionist", label: "Nutritionist" },
+  { value: "dental", label: "Dentist" },
+  { value: "optician", label: "Optician" },
+];
+
 function Header({ nurseName, onLogout }) {
   return (
     <header className="triage-header">
@@ -56,16 +66,41 @@ function PatientList({ patients, onStart }) {
 }
 
 function TriageModal({ isOpen, patient, onClose, onSubmit }) {
-  const [form, setForm] = useState({ bloodPressure: "", heartRate: "", temperature: "", weight: "", notes: "" });
+  const [form, setForm] = useState({
+    bloodPressure: "",
+    assignedDoctorType: "general_doctor",
+    heartRate: "",
+    respiratoryRate: "",
+    spo2: "",
+    temperature: "",
+    weight: "",
+    height: "",
+    notes: "",
+  });
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const computedBmi = useMemo(() => {
+    const weight = Number(form.weight);
+    const height = Number(form.height);
+
+    if (!weight || !height || height <= 0) {
+      return "";
+    }
+
+    return (weight / (height * height)).toFixed(2);
+  }, [form.height, form.weight]);
 
   const isFormValid = useMemo(() => {
     return (
       form.bloodPressure.trim() !== "" &&
+      form.assignedDoctorType.trim() !== "" &&
       form.heartRate.trim() !== "" &&
+      form.respiratoryRate.trim() !== "" &&
+      form.spo2.trim() !== "" &&
       form.temperature.trim() !== "" &&
-      form.weight.trim() !== ""
+      form.weight.trim() !== "" &&
+      form.height.trim() !== ""
     );
   }, [form]);
 
@@ -87,14 +122,28 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
       onSubmit({
         patient,
         bloodPressure: form.bloodPressure.trim(),
+        assignedDoctorType: form.assignedDoctorType,
         heartRate: Number(form.heartRate),
+        respiratoryRate: Number(form.respiratoryRate),
+        spo2: Number(form.spo2),
         temperature: Number(form.temperature),
         weight: Number(form.weight),
+        height: Number(form.height),
         notes: form.notes,
       })
     )
       .then(() => {
-        setForm({ bloodPressure: "", heartRate: "", temperature: "", weight: "", notes: "" });
+        setForm({
+          bloodPressure: "",
+          assignedDoctorType: "general_doctor",
+          heartRate: "",
+          respiratoryRate: "",
+          spo2: "",
+          temperature: "",
+          weight: "",
+          height: "",
+          notes: "",
+        });
       })
       .catch((submitError) => {
         setError(submitError.message);
@@ -124,8 +173,31 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
             />
           </label>
           <label>
+            Refer to Doctor Type *
+            <select value={form.assignedDoctorType} onChange={handleField("assignedDoctorType")}>
+              {DOCTOR_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             Heart Rate (bpm) *
             <input type="number" value={form.heartRate} onChange={handleField("heartRate")} placeholder="e.g. 82" />
+          </label>
+          <label>
+            Respiratory Rate (RR) *
+            <input
+              type="number"
+              value={form.respiratoryRate}
+              onChange={handleField("respiratoryRate")}
+              placeholder="e.g. 18"
+            />
+          </label>
+          <label>
+            Oxygen Saturation (SpO2) *
+            <input type="number" value={form.spo2} onChange={handleField("spo2")} placeholder="e.g. 98" />
           </label>
           <label>
             Temperature (C) *
@@ -134,6 +206,14 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
           <label>
             Weight (kg) *
             <input type="number" value={form.weight} step="0.1" onChange={handleField("weight")} placeholder="e.g. 64" />
+          </label>
+          <label>
+            Height (m) *
+            <input type="number" value={form.height} step="0.01" onChange={handleField("height")} placeholder="e.g. 1.25" />
+          </label>
+          <label>
+            BMI
+            <input type="text" value={computedBmi} readOnly placeholder="Calculated automatically" />
           </label>
           <label>
             Nurse Notes
@@ -204,16 +284,24 @@ export default function TriagePage({ currentUser, onLogout }) {
 
   const handleSubmit = useCallback(async (triageData) => {
     setPageError("");
-    await submitTriage({
+    const savedTriage = await submitTriage({
       patient_id: triageData.patient.id,
       blood_pressure: triageData.bloodPressure,
+      assigned_doctor_type: triageData.assignedDoctorType,
       temperature: triageData.temperature,
       weight: triageData.weight,
+      height: triageData.height,
       heart_rate: triageData.heartRate,
+      respiratory_rate: triageData.respiratoryRate,
+      spo2: triageData.spo2,
       nurse_notes: triageData.notes,
     });
 
-    setSuccessMessage(`Triage data saved for ${triageData.patient.name}.`);
+    setSuccessMessage(
+      `Triage data saved for ${triageData.patient.name}. Referred to ${
+        DOCTOR_TYPE_OPTIONS.find((option) => option.value === savedTriage.assigned_doctor_type)?.label || "Doctor"
+      }. BMI: ${savedTriage.bmi ?? "N/A"}.`
+    );
     closeTriage();
     await refresh({ source: "after-triage" });
   }, [closeTriage, refresh]);

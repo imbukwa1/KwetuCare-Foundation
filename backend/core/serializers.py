@@ -165,7 +165,7 @@ class PatientRegistrationSerializer(serializers.ModelSerializer):
             "gender",
             "phone",
             "camp",
-            "village",
+            "location",
             "next_of_kin",
             "has_child",
             "child_name",
@@ -247,6 +247,14 @@ class PatientRegistrationSerializer(serializers.ModelSerializer):
 
 class TriageSerializer(serializers.ModelSerializer):
     patient_id = serializers.IntegerField(write_only=True)
+    assigned_doctor_type = serializers.ChoiceField(
+        choices=Patient.DoctorType.choices,
+        required=True,
+        write_only=True,
+    )
+    height = serializers.DecimalField(max_digits=4, decimal_places=2, required=True)
+    respiratory_rate = serializers.IntegerField(required=True)
+    spo2 = serializers.IntegerField(required=True)
 
     class Meta:
         model = Triage
@@ -254,14 +262,19 @@ class TriageSerializer(serializers.ModelSerializer):
             "id",
             "patient_id",
             "patient",
+            "assigned_doctor_type",
             "blood_pressure",
             "temperature",
             "weight",
+            "height",
+            "bmi",
             "heart_rate",
+            "respiratory_rate",
+            "spo2",
             "nurse_notes",
             "created_at",
         )
-        read_only_fields = ("id", "patient", "created_at")
+        read_only_fields = ("id", "patient", "bmi", "created_at")
 
     def validate_temperature(self, value):
         if value < 30 or value > 45:
@@ -279,9 +292,26 @@ class TriageSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Weight must be greater than 0 and not exceed 500 kg.")
         return value
 
+    def validate_height(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Height must be greater than 0.")
+        if value < 0.5 or value > 2.5:
+            raise serializers.ValidationError("Height must be between 0.50m and 2.50m.")
+        return value
+
     def validate_heart_rate(self, value):
         if value < 30 or value > 220:
             raise serializers.ValidationError("Heart rate must be between 30 and 220 bpm.")
+        return value
+
+    def validate_respiratory_rate(self, value):
+        if value < 12 or value > 25:
+            raise serializers.ValidationError("Respiratory rate must be between 12 and 25 breaths per minute.")
+        return value
+
+    def validate_spo2(self, value):
+        if value < 70 or value > 100:
+            raise serializers.ValidationError("SpO2 must be between 70 and 100.")
         return value
 
     def validate_patient_id(self, value):
@@ -303,6 +333,7 @@ class TriageSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data.pop("patient_id")
+        assigned_doctor_type = validated_data.pop("assigned_doctor_type")
 
         with transaction.atomic():
             patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
@@ -320,20 +351,31 @@ class TriageSerializer(serializers.ModelSerializer):
             triage = Triage.objects.create(patient=patient, **validated_data)
             patient.status = Patient.Status.DOCTOR
             patient.doctor_started_at = timezone.now()
-            patient.save(update_fields=["status", "doctor_started_at"])
+            patient.assigned_doctor_type = assigned_doctor_type
+            patient.save(update_fields=["status", "doctor_started_at", "assigned_doctor_type"])
             create_audit_log(
                 user=self.context["request"].user,
                 action="triage_completed",
                 patient=patient,
                 details={
+                    "assigned_doctor_type": patient.assigned_doctor_type,
                     "blood_pressure": triage.blood_pressure,
                     "temperature": str(triage.temperature),
                     "weight": str(triage.weight),
+                    "height": str(triage.height),
+                    "bmi": str(triage.bmi) if triage.bmi is not None else None,
                     "heart_rate": triage.heart_rate,
+                    "respiratory_rate": triage.respiratory_rate,
+                    "spo2": triage.spo2,
                     "status": patient.status,
                 },
             )
             return triage
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["assigned_doctor_type"] = instance.patient.assigned_doctor_type
+        return data
 
 
 class PrescriptionCreateSerializer(serializers.ModelSerializer):
@@ -662,7 +704,8 @@ class PatientListSerializer(serializers.ModelSerializer):
             "gender",
             "phone",
             "camp",
-            "village",
+            "location",
+            "assigned_doctor_type",
             "has_child",
             "guardian_name",
             "priority",
@@ -699,7 +742,11 @@ class TriageDetailSerializer(serializers.ModelSerializer):
             "blood_pressure",
             "temperature",
             "weight",
+            "height",
+            "bmi",
             "heart_rate",
+            "respiratory_rate",
+            "spo2",
             "nurse_notes",
             "created_at",
         )
@@ -721,6 +768,8 @@ class PatientWorkflowDetailSerializer(serializers.ModelSerializer):
             "name",
             "age",
             "camp",
+            "location",
+            "assigned_doctor_type",
             "has_child",
             "guardian_name",
             "priority",

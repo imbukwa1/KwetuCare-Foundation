@@ -4,13 +4,23 @@ import "./DoctorConsultationPage.css";
 import { fetchPatientDetail, fetchQueue, submitConsultation } from "./api";
 import useHybridDataSync from "./useHybridDataSync";
 
-function Header({ doctorName, onLogout }) {
+const ROLE_LABELS = {
+  general_doctor: "General Doctor",
+  pediatrician: "Pediatrician",
+  gynecologist: "Gynecologist",
+  obstetrician: "Obstetrician",
+  nutritionist: "Nutritionist",
+  dental: "Dentist",
+  optician: "Optician",
+};
+
+function Header({ doctorName, title, onLogout }) {
   return (
     <header className="doc-header">
       <div className="doc-logo">
         <img src={logo} alt="KCF logo" className="site-logo" />
       </div>
-      <h1>Doctor</h1>
+      <h1>{title}</h1>
       <div className="doc-profile">
         <span>{doctorName}</span>
         <button className="btn-maroon" onClick={onLogout}>
@@ -29,6 +39,7 @@ function PatientCard({ patient, onStart }) {
         <p>ID: {patient.id}</p>
         <p>Reg No: {patient.reg_no}</p>
         <p>Camp: {patient.camp}</p>
+        <p>Referred To: {ROLE_LABELS[patient.assigned_doctor_type] || patient.assigned_doctor_type}</p>
         <p>Priority: {patient.priority}</p>
       </div>
       <button className="btn-maroon" onClick={() => onStart(patient)}>
@@ -156,6 +167,10 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
                 Priority
                 <input value={patient.priority} readOnly />
               </label>
+              <label>
+                Referred To
+                <input value={ROLE_LABELS[patient.assigned_doctor_type] || patient.assigned_doctor_type || ""} readOnly />
+              </label>
               {patient.guardian_name && (
                 <label>
                   Guardian
@@ -184,6 +199,22 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
                 <label>
                   Weight
                   <input value={patient.triage.weight || ""} readOnly />
+                </label>
+                <label>
+                  Height
+                  <input value={patient.triage.height || ""} readOnly />
+                </label>
+                <label>
+                  BMI
+                  <input value={patient.triage.bmi || ""} readOnly />
+                </label>
+                <label>
+                  Respiratory Rate
+                  <input value={patient.triage.respiratory_rate || ""} readOnly />
+                </label>
+                <label>
+                  SpO2
+                  <input value={patient.triage.spo2 || ""} readOnly />
                 </label>
               </div>
               <label>
@@ -335,7 +366,11 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
   return (
     <div className="doc-page">
       <div className="doc-container">
-        <Header doctorName={currentUser ? currentUser.username : "Doctor"} onLogout={onLogout} />
+        <Header
+          doctorName={currentUser ? currentUser.username : "Doctor"}
+          title={ROLE_LABELS[currentUser?.role] || "Doctor"}
+          onLogout={onLogout}
+        />
         {successMessage && <p className="doc-status-success">{successMessage}</p>}
         {pageError && <p className="doc-error">{pageError}</p>}
         {lastUpdated && <p className="doc-status-box">Last updated: {lastUpdated.toLocaleTimeString()}</p>}

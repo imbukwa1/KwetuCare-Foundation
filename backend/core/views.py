@@ -10,6 +10,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .models import DrugInventory, Patient, Prescription
 from .permissions import (
+    CONSULTATION_ROLES,
     IsAdminUserRole,
     IsAdminOrPharmacistUser,
     IsApprovedUser,
@@ -189,7 +190,7 @@ class AdminPatientListView(generics.ListAPIView):
                 Q(name__icontains=search)
                 | Q(reg_no__icontains=search)
                 | Q(phone__icontains=search)
-                | Q(village__icontains=search)
+                | Q(location__icontains=search)
             )
 
         if camp:
@@ -206,8 +207,8 @@ class StageQueueView(generics.ListAPIView):
 
     role_stage_map = {
         "nurse": Patient.Status.TRIAGE,
-        "doctor": Patient.Status.DOCTOR,
         "pharmacist": Patient.Status.PHARMACY,
+        **{role: Patient.Status.DOCTOR for role in CONSULTATION_ROLES},
     }
 
     def get_permissions(self):
@@ -219,7 +220,11 @@ class StageQueueView(generics.ListAPIView):
         if stage is None:
             return Patient.objects.none()
 
-        return Patient.objects.filter(status=stage).annotate(
+        queryset = Patient.objects.filter(status=stage)
+        if stage == Patient.Status.DOCTOR:
+            queryset = queryset.filter(assigned_doctor_type=user_role)
+
+        return queryset.annotate(
             priority_rank=Case(
                 When(priority=Patient.Priority.URGENT, then=Value(0)),
                 default=Value(1),

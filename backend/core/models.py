@@ -7,7 +7,13 @@ class User(AbstractUser):
     class Role(models.TextChoices):
         REGISTRATION = "registration", "Registration"
         NURSE = "nurse", "Nurse"
-        DOCTOR = "doctor", "Doctor"
+        GENERAL_DOCTOR = "general_doctor", "General Doctor"
+        PEDIATRICIAN = "pediatrician", "Pediatrician"
+        GYNECOLOGIST = "gynecologist", "Gynecologist"
+        OBSTETRICIAN = "obstetrician", "Obstetrician"
+        NUTRITIONIST = "nutritionist", "Nutritionist"
+        DENTAL = "dental", "Dentist"
+        OPTICIAN = "optician", "Optician"
         PHARMACIST = "pharmacist", "Pharmacist"
         ADMIN = "admin", "Admin"
 
@@ -29,12 +35,21 @@ class Patient(models.Model):
         PHARMACY = "pharmacy", "Pharmacy"
         COMPLETE = "complete", "Complete"
 
+    class DoctorType(models.TextChoices):
+        GENERAL_DOCTOR = User.Role.GENERAL_DOCTOR, "General Doctor"
+        PEDIATRICIAN = User.Role.PEDIATRICIAN, "Pediatrician"
+        GYNECOLOGIST = User.Role.GYNECOLOGIST, "Gynecologist"
+        OBSTETRICIAN = User.Role.OBSTETRICIAN, "Obstetrician"
+        NUTRITIONIST = User.Role.NUTRITIONIST, "Nutritionist"
+        DENTAL = User.Role.DENTAL, "Dentist"
+        OPTICIAN = User.Role.OPTICIAN, "Optician"
+
     name = models.CharField(max_length=255)
     age = models.PositiveIntegerField()
     gender = models.CharField(max_length=20)
     phone = models.CharField(max_length=20)
     camp = models.CharField(max_length=255)
-    village = models.CharField(max_length=255)
+    location = models.CharField(max_length=255)
     next_of_kin = models.CharField(max_length=255)
     has_child = models.BooleanField(default=False)
     child_name = models.CharField(max_length=255, blank=True)
@@ -42,6 +57,11 @@ class Patient(models.Model):
     child_date_of_birth = models.DateField(null=True, blank=True)
     guardian_name = models.CharField(max_length=255, blank=True)
     reg_no = models.CharField(max_length=100, unique=True)
+    assigned_doctor_type = models.CharField(
+        max_length=20,
+        choices=DoctorType.choices,
+        default=DoctorType.GENERAL_DOCTOR,
+    )
     priority = models.CharField(
         max_length=20,
         choices=Priority.choices,
@@ -71,9 +91,20 @@ class Triage(models.Model):
     blood_pressure = models.CharField(max_length=20)
     temperature = models.DecimalField(max_digits=4, decimal_places=1)
     weight = models.DecimalField(max_digits=5, decimal_places=2)
+    height = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+    bmi = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     heart_rate = models.PositiveIntegerField()
+    respiratory_rate = models.PositiveIntegerField(null=True, blank=True)
+    spo2 = models.PositiveIntegerField(null=True, blank=True)
     nurse_notes = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if self.height and self.height > 0:
+            self.bmi = self.weight / (self.height * self.height)
+        else:
+            self.bmi = None
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Triage for {self.patient.reg_no}"
