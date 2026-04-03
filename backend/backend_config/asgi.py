@@ -12,7 +12,7 @@ from core.realtime import updates_socket
 
 
 async def application(scope, receive, send):
-    if scope['type'] == 'websocket' and scope.get('path') == '/ws/updates/':
+    if scope['type'] == 'websocket' and scope.get('path') in {'/ws/updates/', '/ws/realtime/'}:
         await updates_socket(scope, receive, send)
         return
 

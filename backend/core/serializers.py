@@ -1,10 +1,18 @@
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.db import IntegrityError
-from django.db.models import Count
+from django.db import OperationalError
+from django.db.models import Count, Sum
+from django.db.utils import ProgrammingError
 from django.utils import timezone
 from django.utils.text import slugify
+from datetime import timedelta
+import time
+import threading
+import uuid
+import os
 import re
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -16,6 +24,7 @@ from .models import (
     BloodSugarCheck,
     Consultation,
     DentalConsultation,
+    DrugBatch,
     DrugInventory,
     GynecologyConsultation,
     NutritionConsultation,
@@ -45,12 +54,26 @@ def build_unique_username(full_name):
 
 def create_audit_log(*, user, action, patient=None, details=None):
     payload = details or {}
-    AuditLog.objects.create(
-        user=user if getattr(user, "is_authenticated", False) else None,
-        action=action,
-        patient=patient,
-        details=payload,
-    )
+    last_error = None
+    for attempt in range(10):
+        try:
+            AuditLog.objects.create(
+                user=user if getattr(user, "is_authenticated", False) else None,
+                action=action,
+                patient=patient,
+                details=payload,
+            )
+            break
+        except OperationalError as exc:
+            last_error = exc
+            if "locked" not in str(exc).lower():
+                raise
+            time.sleep(min(0.03 * (attempt + 1), 0.3))
+    else:
+        # Audit logging should not take down critical workflow actions during
+        # short SQLite lock windows in local concurrent testing.
+        return
+
     publish_audit_event(action=action, patient=patient, details=payload)
 
 
@@ -71,6 +94,204 @@ def generate_patient_reg_no():
             next_number = 1
 
     return f"{prefix}{next_number:04d}"
+
+
+def generate_patient_reg_no_locked():
+    current_year = timezone.now().year
+    prefix = f"KCF-{current_year}-"
+    latest_patient = (
+        Patient.objects.select_for_update()
+        .filter(reg_no__startswith=prefix)
+        .order_by("-reg_no")
+        .first()
+    )
+
+    next_number = 1
+    if latest_patient:
+        try:
+            next_number = int(latest_patient.reg_no.rsplit("-", 1)[-1]) + 1
+        except (TypeError, ValueError):
+            next_number = 1
+
+    return f"{prefix}{next_number:04d}"
+
+
+def build_patient_reg_no_from_id(patient_id):
+    current_year = timezone.now().year
+    return f"KCF-{current_year}-{patient_id:04d}"
+
+
+EXPIRY_WARNING_DAYS = 30
+UNIVERSAL_INVENTORY_CAMP = "General"
+PATIENT_REGISTRATION_LOCK = threading.Lock()
+PATIENT_REGISTRATION_LOCK_FILE = os.path.join(settings.BASE_DIR, ".patient_registration.lock")
+
+
+class PatientRegistrationFileLock:
+    def __enter__(self):
+        self.fd = None
+        for attempt in range(200):
+            try:
+                self.fd = os.open(
+                    PATIENT_REGISTRATION_LOCK_FILE,
+                    os.O_CREAT | os.O_EXCL | os.O_RDWR,
+                )
+                return self
+            except FileExistsError:
+                time.sleep(min(0.02 * (attempt + 1), 0.2))
+        raise OperationalError("database is locked")
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.fd is not None:
+            os.close(self.fd)
+        try:
+            if os.path.exists(PATIENT_REGISTRATION_LOCK_FILE):
+                os.remove(PATIENT_REGISTRATION_LOCK_FILE)
+        except OSError:
+            pass
+
+
+def sync_batch_statuses():
+    today = timezone.localdate()
+    DrugBatch.objects.filter(quantity_remaining=0).exclude(status=DrugBatch.Status.DEPLETED).update(
+        status=DrugBatch.Status.DEPLETED
+    )
+    DrugBatch.objects.filter(
+        quantity_remaining__gt=0,
+        expiry_date__lte=today,
+    ).exclude(status=DrugBatch.Status.EXPIRED).update(status=DrugBatch.Status.EXPIRED)
+    DrugBatch.objects.filter(
+        quantity_remaining__gt=0,
+        expiry_date__gt=today,
+    ).exclude(status=DrugBatch.Status.ACTIVE).update(status=DrugBatch.Status.ACTIVE)
+
+
+def refresh_inventory_totals(inventory_ids=None):
+    sync_batch_statuses()
+    queryset = DrugInventory.objects.all()
+    if inventory_ids is not None:
+        queryset = queryset.filter(id__in=inventory_ids)
+
+    today = timezone.localdate()
+    for inventory in queryset:
+        total = (
+            inventory.batches.filter(
+                status=DrugBatch.Status.ACTIVE,
+                expiry_date__gt=today,
+                quantity_remaining__gt=0,
+            ).aggregate(total=Sum("quantity_remaining"))["total"]
+            or 0
+        )
+        if inventory.stock_quantity != total:
+            inventory.stock_quantity = total
+            inventory.save(update_fields=["stock_quantity", "updated_at"])
+
+
+def safe_refresh_inventory_totals(inventory_ids=None):
+    try:
+        refresh_inventory_totals(inventory_ids)
+    except (OperationalError, ProgrammingError):
+        # Some read-only contexts (for example lightweight shell checks) should
+        # still be able to build reports without mutating inventory rows.
+        return
+
+
+def ensure_consultation_referral_column():
+    try:
+        table_names = connection.introspection.table_names()
+        if "core_consultation" not in table_names:
+            return
+
+        with connection.cursor() as cursor:
+            columns = {
+                column.name
+                for column in connection.introspection.get_table_description(cursor, "core_consultation")
+            }
+            if "is_referral_case" in columns:
+                return
+
+            vendor = connection.vendor
+            if vendor == "sqlite":
+                cursor.execute(
+                    "ALTER TABLE core_consultation "
+                    "ADD COLUMN is_referral_case BOOLEAN NOT NULL DEFAULT 0"
+                )
+            else:
+                cursor.execute(
+                    "ALTER TABLE core_consultation "
+                    "ADD COLUMN is_referral_case BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+    except (OperationalError, ProgrammingError):
+        return
+
+
+def patient_has_consultation(patient):
+    ensure_consultation_referral_column()
+    try:
+        return Consultation.objects.filter(patient=patient).exists()
+    except (OperationalError, ProgrammingError):
+        ensure_consultation_referral_column()
+        try:
+            return Consultation.objects.filter(patient=patient).exists()
+        except (OperationalError, ProgrammingError):
+            return False
+
+
+def get_patient_consultation(patient):
+    ensure_consultation_referral_column()
+    try:
+        return Consultation.objects.filter(patient=patient).first()
+    except (OperationalError, ProgrammingError):
+        ensure_consultation_referral_column()
+        try:
+            return Consultation.objects.filter(patient=patient).first()
+        except (OperationalError, ProgrammingError):
+            return None
+
+
+def get_available_inventory_queryset(*, camp=None):
+    refresh_inventory_totals()
+    return DrugInventory.objects.filter(stock_quantity__gt=0).order_by("drug_name", "amount")
+
+
+def normalize_prescriptions_against_inventory(prescriptions, *, camp):
+    if not prescriptions:
+        raise serializers.ValidationError("At least one prescription is required.")
+
+    available_inventory = list(get_available_inventory_queryset())
+    inventory_by_key = {
+        (item.drug_name.strip().lower(), item.amount.strip().lower()): item
+        for item in available_inventory
+    }
+
+    normalized_items = []
+    seen_drugs = set()
+    for item in prescriptions:
+        drug_name = item["drug_name"].strip()
+        dosage = item["dosage"].strip()
+        key = (drug_name.lower(), dosage.lower())
+
+        if key in seen_drugs:
+            raise serializers.ValidationError(
+                "Duplicate drug name and dosage combinations are not allowed in one consultation."
+            )
+
+        inventory = inventory_by_key.get(key)
+        if inventory is None:
+            raise serializers.ValidationError(
+                f"{drug_name} {dosage} is not available in stock."
+            )
+
+        seen_drugs.add(key)
+        normalized_items.append(
+            {
+                **item,
+                "drug_name": inventory.drug_name,
+                "dosage": inventory.amount,
+            }
+        )
+
+    return normalized_items
 
 
 class SignupSerializer(serializers.Serializer):
@@ -237,15 +458,33 @@ class PatientRegistrationSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data["status"] = Patient.Status.TRIAGE
+        last_error = None
+        patient = None
+        with PATIENT_REGISTRATION_LOCK:
+            for attempt in range(30):
+                try:
+                    with transaction.atomic():
+                        temp_reg_no = f"TMP-{uuid.uuid4().hex[:12].upper()}"
+                        patient = super().create({**validated_data, "reg_no": temp_reg_no})
+                        patient.reg_no = build_patient_reg_no_from_id(patient.id)
+                        patient.save(update_fields=["reg_no"])
+                    break
+                except IntegrityError as exc:
+                    last_error = exc
+                    time.sleep(min(0.02 * (attempt + 1), 0.25))
+                    continue
+                except OperationalError as exc:
+                    last_error = exc
+                    if "locked" not in str(exc).lower():
+                        raise
+                    time.sleep(min(0.05 * (attempt + 1), 0.5))
+                    continue
 
-        for _ in range(5):
-            validated_data["reg_no"] = generate_patient_reg_no()
-            try:
-                patient = super().create(validated_data)
-                break
-            except IntegrityError:
-                continue
-        else:
+        if patient is None:
+            if last_error is not None:
+                raise serializers.ValidationError(
+                    "Patient registration is busy right now. Please try again."
+                ) from last_error
             raise serializers.ValidationError(
                 "Could not generate a unique registration number. Please try again."
             )
@@ -261,9 +500,9 @@ class PatientRegistrationSerializer(serializers.ModelSerializer):
 
 class TriageSerializer(serializers.ModelSerializer):
     patient_id = serializers.IntegerField(write_only=True)
-    assigned_doctor_type = serializers.ChoiceField(
-        choices=Patient.DoctorType.choices,
+    assigned_doctor_type = serializers.CharField(
         required=False,
+        allow_blank=True,
         allow_null=True,
         write_only=True,
     )
@@ -352,9 +591,18 @@ class TriageSerializer(serializers.ModelSerializer):
         requires_blood_sugar_check = attrs.get("requires_blood_sugar_check", False)
         assigned_doctor_type = attrs.get("assigned_doctor_type")
 
+        if assigned_doctor_type is not None:
+            assigned_doctor_type = str(assigned_doctor_type).strip()
+            attrs["assigned_doctor_type"] = assigned_doctor_type
+
         if not requires_blood_sugar_check and not assigned_doctor_type:
             raise serializers.ValidationError(
                 {"assigned_doctor_type": "Select the doctor type when blood sugar check is not required."}
+            )
+
+        if assigned_doctor_type and assigned_doctor_type not in Patient.DoctorType.values:
+            raise serializers.ValidationError(
+                {"assigned_doctor_type": "Select a valid doctor type."}
             )
 
         return attrs
@@ -439,6 +687,7 @@ class PrescriptionCreateSerializer(serializers.ModelSerializer):
 
 class ConsultationCreateSerializer(serializers.ModelSerializer):
     patient_id = serializers.IntegerField(write_only=True)
+    patient = serializers.SerializerMethodField(read_only=True)
     prescriptions = PrescriptionCreateSerializer(many=True)
     
     # Health Information
@@ -461,6 +710,7 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
     
     # Diagnosis and Management
     diagnosis = serializers.CharField(required=True)
+    isReferralCase = serializers.BooleanField(write_only=True, required=False, default=False)
     doctorNotes = serializers.CharField(write_only=True, required=False, allow_blank=True)
     recommendations = serializers.CharField(write_only=True, required=False, allow_blank=True)
     followUpInstructions = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -493,6 +743,7 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
             "systems_musculoskeletal",
             "systems_neurological",
             "diagnosis",
+            "is_referral_case",
             "doctor_notes",
             "recommendations",
             "follow_up_instructions",
@@ -505,6 +756,7 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
             "medicationsAndAllergies",
             "reviewOfSystems",
             "doctorNotes",
+            "isReferralCase",
             "followUpInstructions",
         )
         read_only_fields = ("id", "patient", "created_at")
@@ -520,7 +772,7 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
                 "Only patients in the doctor stage can be processed by a doctor."
             )
 
-        if hasattr(patient, "consultation"):
+        if patient_has_consultation(patient):
             raise serializers.ValidationError(
                 "Consultation has already been recorded for this patient."
             )
@@ -529,38 +781,23 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_prescriptions(self, value):
-        if not value:
-            raise serializers.ValidationError("At least one prescription is required.")
+        patient = self.context.get("patient")
+        camp = patient.camp if patient else None
+        return normalize_prescriptions_against_inventory(value, camp=camp)
 
-        inventory_by_name = {
-            item.drug_name.strip().lower(): item.drug_name
-            for item in DrugInventory.objects.all()
+    def get_patient(self, obj):
+        return {
+            "id": obj.patient.id,
+            "reg_no": obj.patient.reg_no,
+            "status": obj.patient.status,
+            "assigned_doctor_type": obj.patient.assigned_doctor_type,
         }
-        seen_drugs = set()
-        normalized_items = []
-        for item in value:
-            drug_name = item["drug_name"].strip().lower()
-            if drug_name in seen_drugs:
-                raise serializers.ValidationError("Duplicate drug names are not allowed in one consultation.")
-            canonical_name = inventory_by_name.get(drug_name)
-            if canonical_name is None:
-                raise serializers.ValidationError(
-                    f"{item['drug_name'].strip()} is not available in inventory."
-                )
-            seen_drugs.add(drug_name)
-            normalized_items.append(
-                {
-                    **item,
-                    "drug_name": canonical_name,
-                }
-            )
-
-        return normalized_items
 
     @transaction.atomic
     def create(self, validated_data):
         prescriptions_data = validated_data.pop("prescriptions")
         validated_data.pop("patient_id")
+        ensure_consultation_referral_column()
         
         # Extract camelCase fields and map to snake_case
         health_info = validated_data.pop("healthInformation", {})
@@ -570,6 +807,7 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
         meds_allergies = validated_data.pop("medicationsAndAllergies", {})
         systems = validated_data.pop("reviewOfSystems", {})
         doctor_notes = validated_data.pop("doctorNotes", "")
+        is_referral_case = validated_data.pop("isReferralCase", False)
         recommendations = validated_data.pop("recommendations", "")
         follow_up = validated_data.pop("followUpInstructions", "")
         
@@ -602,6 +840,7 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
         validated_data["systems_neurological"] = systems.get("neurological", "")
         
         validated_data["doctor_notes"] = doctor_notes
+        validated_data["is_referral_case"] = is_referral_case
         validated_data["recommendations"] = recommendations
         validated_data["follow_up_instructions"] = follow_up
 
@@ -636,9 +875,29 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
                 "status": patient.status,
                 "prescription_count": len(prescriptions_data),
                 "diagnosis": consultation.diagnosis,
+                "is_referral_case": consultation.is_referral_case,
             },
         )
         return consultation
+
+    def to_representation(self, instance):
+        prescriptions = instance.prescriptions.all().order_by("id")
+        return {
+            "id": instance.id,
+            "patient": {
+                "id": instance.patient.id,
+                "reg_no": instance.patient.reg_no,
+                "status": instance.patient.status,
+                "assigned_doctor_type": instance.patient.assigned_doctor_type,
+            },
+            "diagnosis": instance.diagnosis,
+            "is_referral_case": instance.is_referral_case,
+            "doctor_notes": instance.doctor_notes,
+            "recommendations": instance.recommendations,
+            "follow_up_instructions": instance.follow_up_instructions,
+            "prescriptions": PrescriptionDetailSerializer(prescriptions, many=True).data,
+            "created_at": instance.created_at,
+        }
 
 
 class PediatricConsultationCreateSerializer(serializers.ModelSerializer):
@@ -681,38 +940,22 @@ class PediatricConsultationCreateSerializer(serializers.ModelSerializer):
         if hasattr(patient, "pediatric_consultation"):
             raise serializers.ValidationError("Pediatric consultation has already been recorded for this patient.")
 
-        if hasattr(patient, "consultation"):
+        if patient_has_consultation(patient):
             raise serializers.ValidationError("Consultation has already been recorded for this patient.")
 
         self.context["patient"] = patient
         return value
 
     def validate_prescriptions(self, value):
-        if not value:
-            raise serializers.ValidationError("At least one prescription is required.")
-        inventory_by_name = {
-            item.drug_name.strip().lower(): item.drug_name
-            for item in DrugInventory.objects.all()
-        }
-        normalized_items = []
-        seen_drugs = set()
-        for item in value:
-            drug_name = item["drug_name"].strip().lower()
-            if drug_name in seen_drugs:
-                raise serializers.ValidationError("Duplicate drug names are not allowed in one consultation.")
-            canonical_name = inventory_by_name.get(drug_name)
-            if canonical_name is None:
-                raise serializers.ValidationError(
-                    f"{item['drug_name'].strip()} is not available in inventory."
-                )
-            seen_drugs.add(drug_name)
-            normalized_items.append({**item, "drug_name": canonical_name})
-        return normalized_items
+        patient = self.context.get("patient")
+        camp = patient.camp if patient else None
+        return normalize_prescriptions_against_inventory(value, camp=camp)
 
     @transaction.atomic
     def create(self, validated_data):
         prescriptions_data = validated_data.pop("prescriptions")
         validated_data.pop("patient_id")
+        ensure_consultation_referral_column()
 
         patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
 
@@ -766,7 +1009,8 @@ class PediatricConsultationCreateSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         data["patient_id"] = instance.patient_id
         data["status"] = instance.patient.status
-        data["prescription_count"] = instance.patient.consultation.prescriptions.count()
+        consultation = get_patient_consultation(instance.patient)
+        data["prescription_count"] = consultation.prescriptions.count() if consultation else 0
         return data
 
 
@@ -802,27 +1046,9 @@ class WomensHealthConsultationBaseSerializer(serializers.ModelSerializer):
         return value
 
     def validate_prescriptions(self, value):
-        if not value:
-            raise serializers.ValidationError("At least one prescription is required.")
-
-        inventory_by_name = {
-            item.drug_name.strip().lower(): item.drug_name
-            for item in DrugInventory.objects.all()
-        }
-        normalized_items = []
-        seen_drugs = set()
-        for item in value:
-            drug_name = item["drug_name"].strip().lower()
-            if drug_name in seen_drugs:
-                raise serializers.ValidationError("Duplicate drug names are not allowed in one consultation.")
-            canonical_name = inventory_by_name.get(drug_name)
-            if canonical_name is None:
-                raise serializers.ValidationError(
-                    f"{item['drug_name'].strip()} is not available in inventory."
-                )
-            seen_drugs.add(drug_name)
-            normalized_items.append({**item, "drug_name": canonical_name})
-        return normalized_items
+        patient = self.context.get("patient")
+        camp = patient.camp if patient else None
+        return normalize_prescriptions_against_inventory(value, camp=camp)
 
     def build_consultation_notes(self, specialist_consultation):
         sections = [
@@ -845,6 +1071,7 @@ class WomensHealthConsultationBaseSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         prescriptions_data = validated_data.pop("prescriptions")
         validated_data.pop("patient_id")
+        ensure_consultation_referral_column()
 
         patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
 
@@ -888,7 +1115,8 @@ class WomensHealthConsultationBaseSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         data["patient_id"] = instance.patient_id
         data["status"] = instance.patient.status
-        data["prescription_count"] = instance.patient.consultation.prescriptions.count()
+        consultation = get_patient_consultation(instance.patient)
+        data["prescription_count"] = consultation.prescriptions.count() if consultation else 0
         return data
 
 
@@ -984,38 +1212,22 @@ class NutritionConsultationCreateSerializer(serializers.ModelSerializer):
         if hasattr(patient, "nutrition_consultation"):
             raise serializers.ValidationError("Nutrition consultation has already been recorded for this patient.")
 
-        if hasattr(patient, "consultation"):
+        if patient_has_consultation(patient):
             raise serializers.ValidationError("Consultation has already been recorded for this patient.")
 
         self.context["patient"] = patient
         return value
 
     def validate_prescriptions(self, value):
-        if not value:
-            raise serializers.ValidationError("At least one prescription is required.")
-        inventory_by_name = {
-            item.drug_name.strip().lower(): item.drug_name
-            for item in DrugInventory.objects.all()
-        }
-        normalized_items = []
-        seen_drugs = set()
-        for item in value:
-            drug_name = item["drug_name"].strip().lower()
-            if drug_name in seen_drugs:
-                raise serializers.ValidationError("Duplicate drug names are not allowed in one consultation.")
-            canonical_name = inventory_by_name.get(drug_name)
-            if canonical_name is None:
-                raise serializers.ValidationError(
-                    f"{item['drug_name'].strip()} is not available in inventory."
-                )
-            seen_drugs.add(drug_name)
-            normalized_items.append({**item, "drug_name": canonical_name})
-        return normalized_items
+        patient = self.context.get("patient")
+        camp = patient.camp if patient else None
+        return normalize_prescriptions_against_inventory(value, camp=camp)
 
     @transaction.atomic
     def create(self, validated_data):
         prescriptions_data = validated_data.pop("prescriptions")
         validated_data.pop("patient_id")
+        ensure_consultation_referral_column()
 
         patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
 
@@ -1078,7 +1290,8 @@ class NutritionConsultationCreateSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         data["patient_id"] = instance.patient_id
         data["status"] = instance.patient.status
-        data["prescription_count"] = instance.patient.consultation.prescriptions.count()
+        consultation = get_patient_consultation(instance.patient)
+        data["prescription_count"] = consultation.prescriptions.count() if consultation else 0
         return data
 
 
@@ -1121,38 +1334,22 @@ class OpticianConsultationCreateSerializer(serializers.ModelSerializer):
         if hasattr(patient, "optician_consultation"):
             raise serializers.ValidationError("Optician consultation has already been recorded for this patient.")
 
-        if hasattr(patient, "consultation"):
+        if patient_has_consultation(patient):
             raise serializers.ValidationError("Consultation has already been recorded for this patient.")
 
         self.context["patient"] = patient
         return value
 
     def validate_prescriptions(self, value):
-        if not value:
-            raise serializers.ValidationError("At least one prescription is required.")
-        inventory_by_name = {
-            item.drug_name.strip().lower(): item.drug_name
-            for item in DrugInventory.objects.all()
-        }
-        normalized_items = []
-        seen_drugs = set()
-        for item in value:
-            drug_name = item["drug_name"].strip().lower()
-            if drug_name in seen_drugs:
-                raise serializers.ValidationError("Duplicate drug names are not allowed in one consultation.")
-            canonical_name = inventory_by_name.get(drug_name)
-            if canonical_name is None:
-                raise serializers.ValidationError(
-                    f"{item['drug_name'].strip()} is not available in inventory."
-                )
-            seen_drugs.add(drug_name)
-            normalized_items.append({**item, "drug_name": canonical_name})
-        return normalized_items
+        patient = self.context.get("patient")
+        camp = patient.camp if patient else None
+        return normalize_prescriptions_against_inventory(value, camp=camp)
 
     @transaction.atomic
     def create(self, validated_data):
         prescriptions_data = validated_data.pop("prescriptions")
         validated_data.pop("patient_id")
+        ensure_consultation_referral_column()
 
         patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
 
@@ -1210,7 +1407,8 @@ class OpticianConsultationCreateSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         data["patient_id"] = instance.patient_id
         data["status"] = instance.patient.status
-        data["prescription_count"] = instance.patient.consultation.prescriptions.count()
+        consultation = get_patient_consultation(instance.patient)
+        data["prescription_count"] = consultation.prescriptions.count() if consultation else 0
         return data
 
 
@@ -1253,38 +1451,22 @@ class DentalConsultationCreateSerializer(serializers.ModelSerializer):
         if hasattr(patient, "dental_consultation"):
             raise serializers.ValidationError("Dental consultation has already been recorded for this patient.")
 
-        if hasattr(patient, "consultation"):
+        if patient_has_consultation(patient):
             raise serializers.ValidationError("Consultation has already been recorded for this patient.")
 
         self.context["patient"] = patient
         return value
 
     def validate_prescriptions(self, value):
-        if not value:
-            raise serializers.ValidationError("At least one prescription is required.")
-        inventory_by_name = {
-            item.drug_name.strip().lower(): item.drug_name
-            for item in DrugInventory.objects.all()
-        }
-        normalized_items = []
-        seen_drugs = set()
-        for item in value:
-            drug_name = item["drug_name"].strip().lower()
-            if drug_name in seen_drugs:
-                raise serializers.ValidationError("Duplicate drug names are not allowed in one consultation.")
-            canonical_name = inventory_by_name.get(drug_name)
-            if canonical_name is None:
-                raise serializers.ValidationError(
-                    f"{item['drug_name'].strip()} is not available in inventory."
-                )
-            seen_drugs.add(drug_name)
-            normalized_items.append({**item, "drug_name": canonical_name})
-        return normalized_items
+        patient = self.context.get("patient")
+        camp = patient.camp if patient else None
+        return normalize_prescriptions_against_inventory(value, camp=camp)
 
     @transaction.atomic
     def create(self, validated_data):
         prescriptions_data = validated_data.pop("prescriptions")
         validated_data.pop("patient_id")
+        ensure_consultation_referral_column()
 
         patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
 
@@ -1342,7 +1524,8 @@ class DentalConsultationCreateSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         data["patient_id"] = instance.patient_id
         data["status"] = instance.patient.status
-        data["prescription_count"] = instance.patient.consultation.prescriptions.count()
+        consultation = get_patient_consultation(instance.patient)
+        data["prescription_count"] = consultation.prescriptions.count() if consultation else 0
         return data
 
 
@@ -1366,7 +1549,7 @@ class PharmacyDispenseSerializer(serializers.Serializer):
                 "Only patients in the pharmacy stage can be processed by a pharmacist."
             )
 
-        if not hasattr(patient, "consultation"):
+        if not patient_has_consultation(patient):
             raise serializers.ValidationError("This patient has no consultation record.")
 
         self.context["patient"] = patient
@@ -1391,17 +1574,20 @@ class PharmacyDispenseSerializer(serializers.Serializer):
                 "This patient is no longer in the pharmacy stage."
             )
 
-        if not hasattr(patient, "consultation"):
+        if not patient_has_consultation(patient):
             raise serializers.ValidationError("This patient has no consultation record.")
 
-        consultation = patient.consultation
+        consultation = get_patient_consultation(patient)
+        if consultation is None:
+            raise serializers.ValidationError("This patient has no consultation record.")
         prescription_map = {
             prescription.id: prescription
             for prescription in consultation.prescriptions.select_for_update()
         }
+        available_inventory = get_available_inventory_queryset().select_for_update()
         inventory_map = {
-            item.drug_name.strip().lower(): item
-            for item in DrugInventory.objects.select_for_update()
+            (item.drug_name.strip().lower(), item.amount.strip().lower()): item
+            for item in available_inventory
         }
 
         submitted_ids = set()
@@ -1415,10 +1601,17 @@ class PharmacyDispenseSerializer(serializers.Serializer):
 
             requested_status = item["status"]
             if requested_status == Prescription.Status.GIVEN:
-                inventory = inventory_map.get(prescription.drug_name.lower())
+                inventory = inventory_map.get(
+                    (prescription.drug_name.strip().lower(), prescription.dosage.strip().lower())
+                )
                 if inventory is None:
                     raise serializers.ValidationError(
-                        {"prescriptions": f"No inventory record found for {prescription.drug_name}."}
+                        {
+                            "prescriptions": (
+                                f"No valid stock found for {prescription.drug_name} "
+                                f"{prescription.dosage} in {patient.camp}."
+                            )
+                        }
                     )
                 if inventory.stock_quantity < prescription.quantity:
                     raise serializers.ValidationError(
@@ -1429,8 +1622,29 @@ class PharmacyDispenseSerializer(serializers.Serializer):
                             )
                         }
                     )
-                inventory.stock_quantity -= prescription.quantity
-                inventory.save(update_fields=["stock_quantity", "updated_at"])
+                remaining_to_deduct = prescription.quantity
+                eligible_batches = list(
+                    inventory.batches.select_for_update().filter(
+                        status=DrugBatch.Status.ACTIVE,
+                        expiry_date__gt=timezone.localdate(),
+                        quantity_remaining__gt=0,
+                    ).order_by("expiry_date", "created_at", "id")
+                )
+
+                for batch in eligible_batches:
+                    if remaining_to_deduct <= 0:
+                        break
+                    deduction = min(batch.quantity_remaining, remaining_to_deduct)
+                    batch.quantity_remaining -= deduction
+                    batch.save(update_fields=["quantity_remaining", "updated_at"])
+                    remaining_to_deduct -= deduction
+
+                if remaining_to_deduct > 0:
+                    raise serializers.ValidationError(
+                        {"prescriptions": f"Unable to deduct enough stock for {prescription.drug_name}."}
+                    )
+
+                refresh_inventory_totals([inventory.id])
 
             prescription.status = item["status"]
             prescription.save(update_fields=["status"])
@@ -1456,7 +1670,14 @@ class PharmacyDispenseSerializer(serializers.Serializer):
         return patient
 
     def to_representation(self, instance):
-        consultation = instance.consultation
+        consultation = get_patient_consultation(instance)
+        if consultation is None:
+            return {
+                "patient_id": instance.id,
+                "reg_no": instance.reg_no,
+                "status": instance.status,
+                "prescriptions": [],
+            }
         return {
             "patient_id": instance.id,
             "reg_no": instance.reg_no,
@@ -1474,16 +1695,23 @@ class PharmacyDispenseSerializer(serializers.Serializer):
 
 class DrugInventorySerializer(serializers.ModelSerializer):
     is_low_stock = serializers.SerializerMethodField()
+    expired_batch_count = serializers.SerializerMethodField()
+    near_expiry_batch_count = serializers.SerializerMethodField()
+    batches = serializers.SerializerMethodField()
 
     class Meta:
         model = DrugInventory
         fields = (
             "id",
+            "camp",
             "drug_name",
             "amount",
             "stock_quantity",
             "reorder_level",
             "is_low_stock",
+            "expired_batch_count",
+            "near_expiry_batch_count",
+            "batches",
             "updated_at",
         )
         read_only_fields = ("id", "is_low_stock", "updated_at")
@@ -1491,15 +1719,39 @@ class DrugInventorySerializer(serializers.ModelSerializer):
     def get_is_low_stock(self, obj):
         return obj.stock_quantity <= obj.reorder_level
 
+    def get_expired_batch_count(self, obj):
+        sync_batch_statuses()
+        return obj.batches.filter(status=DrugBatch.Status.EXPIRED).count()
+
+    def get_near_expiry_batch_count(self, obj):
+        sync_batch_statuses()
+        today = timezone.localdate()
+        warning_date = today + timedelta(days=EXPIRY_WARNING_DAYS)
+        return obj.batches.filter(
+            status=DrugBatch.Status.ACTIVE,
+            expiry_date__gt=today,
+            expiry_date__lte=warning_date,
+            quantity_remaining__gt=0,
+        ).count()
+
+    def get_batches(self, obj):
+        sync_batch_statuses()
+        batches = obj.batches.all().order_by("expiry_date", "id")
+        return DrugBatchSerializer(batches, many=True).data
+
     def validate_drug_name(self, value):
         normalized_value = value.strip()
         if not normalized_value:
             raise serializers.ValidationError("Drug name is required.")
-        queryset = DrugInventory.objects.filter(drug_name__iexact=normalized_value)
+        queryset = DrugInventory.objects.filter(
+            drug_name__iexact=normalized_value,
+            camp__iexact=UNIVERSAL_INVENTORY_CAMP,
+            amount__iexact=self.initial_data.get("amount", "").strip(),
+        )
         if self.instance is not None:
             queryset = queryset.exclude(pk=self.instance.pk)
         if queryset.exists():
-            raise serializers.ValidationError("A drug with this name already exists.")
+            raise serializers.ValidationError("This drug and unit already exists in inventory.")
         return normalized_value
 
     def validate_amount(self, value):
@@ -1509,24 +1761,123 @@ class DrugInventorySerializer(serializers.ModelSerializer):
         return normalized_value
 
 
-class InventoryAdjustSerializer(serializers.Serializer):
-    amount = serializers.IntegerField(min_value=1, required=False)
-    quantity = serializers.IntegerField(min_value=1, required=False)
+class DrugBatchSerializer(serializers.ModelSerializer):
+    is_expired = serializers.SerializerMethodField()
+    is_near_expiry = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DrugBatch
+        fields = (
+            "id",
+            "quantity_received",
+            "quantity_remaining",
+            "expiry_date",
+            "status",
+            "is_expired",
+            "is_near_expiry",
+            "created_at",
+        )
+
+    def get_is_expired(self, obj):
+        return obj.status == DrugBatch.Status.EXPIRED
+
+    def get_is_near_expiry(self, obj):
+        if obj.status != DrugBatch.Status.ACTIVE:
+            return False
+        today = timezone.localdate()
+        warning_date = today + timedelta(days=EXPIRY_WARNING_DAYS)
+        return today < obj.expiry_date <= warning_date
+
+
+class DrugInventoryCreateSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    camp = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    drug_name = serializers.CharField()
+    amount = serializers.CharField()
+    stock_quantity = serializers.IntegerField(min_value=1)
+    reorder_level = serializers.IntegerField(min_value=0)
+    expiry_date = serializers.DateField(write_only=True)
+
+    def validate_expiry_date(self, value):
+        if value <= timezone.localdate():
+            raise serializers.ValidationError("Expiry date must be in the future.")
+        return value
 
     def validate(self, attrs):
-        amount = attrs.get("amount")
-        quantity = attrs.get("quantity")
-
-        if amount is None and quantity is None:
-            raise serializers.ValidationError("Provide restock amount or quantity.")
-
-        if amount is not None and quantity is not None and amount != quantity:
-            raise serializers.ValidationError(
-                "Amount and quantity must match when both are provided."
-            )
-
-        attrs["amount"] = amount if amount is not None else quantity
+        attrs["drug_name"] = attrs["drug_name"].strip()
+        attrs["amount"] = attrs["amount"].strip()
+        attrs["camp"] = UNIVERSAL_INVENTORY_CAMP
+        if not attrs["drug_name"] or not attrs["amount"]:
+            raise serializers.ValidationError("Drug name and amount are required.")
         return attrs
+
+    def create(self, validated_data):
+        stock_quantity = validated_data.pop("stock_quantity")
+        expiry_date = validated_data.pop("expiry_date")
+        inventory, _ = DrugInventory.objects.get_or_create(
+            camp=validated_data["camp"],
+            drug_name=validated_data["drug_name"],
+            amount=validated_data["amount"],
+            defaults={"reorder_level": validated_data["reorder_level"]},
+        )
+        inventory.reorder_level = validated_data["reorder_level"]
+        inventory.save(update_fields=["reorder_level", "updated_at"])
+        DrugBatch.objects.create(
+            inventory=inventory,
+            quantity_received=stock_quantity,
+            quantity_remaining=stock_quantity,
+            expiry_date=expiry_date,
+        )
+        refresh_inventory_totals([inventory.id])
+        return inventory
+
+    def to_representation(self, instance):
+        refresh_inventory_totals([instance.id])
+        instance.refresh_from_db()
+        return {
+            "id": instance.id,
+            "camp": instance.camp,
+            "drug_name": instance.drug_name,
+            "amount": instance.amount,
+            "stock_quantity": instance.stock_quantity,
+            "reorder_level": instance.reorder_level,
+            "is_low_stock": instance.stock_quantity <= instance.reorder_level,
+            "expired_batch_count": instance.batches.filter(status=DrugBatch.Status.EXPIRED).count(),
+            "near_expiry_batch_count": DrugInventorySerializer(instance, context=self.context).get_near_expiry_batch_count(instance),
+            "batches": DrugBatchSerializer(instance.batches.all().order_by("expiry_date", "id"), many=True).data,
+            "updated_at": instance.updated_at,
+        }
+
+
+class InventoryRestockSerializer(serializers.Serializer):
+    quantity = serializers.IntegerField(min_value=1)
+    expiry_date = serializers.DateField()
+
+    def to_internal_value(self, data):
+        mutable = dict(data)
+        if "quantity" not in mutable:
+            for alias in ("stock_quantity", "amount"):
+                if alias in mutable:
+                    mutable["quantity"] = mutable[alias]
+                    break
+        return super().to_internal_value(mutable)
+
+    def validate_expiry_date(self, value):
+        if value <= timezone.localdate():
+            raise serializers.ValidationError("Expiry date must be in the future.")
+        return value
+
+
+class AvailableDrugSerializer(serializers.ModelSerializer):
+    label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DrugInventory
+        fields = ("id", "drug_name", "amount", "stock_quantity", "label")
+
+    def get_label(self, obj):
+        unit_label = "unit" if obj.stock_quantity == 1 else "units"
+        return f"{obj.stock_quantity} {unit_label} of {obj.amount}"
 
 
 class PatientListSerializer(serializers.ModelSerializer):
@@ -1740,20 +2091,22 @@ class PatientWorkflowDetailSerializer(serializers.ModelSerializer):
         }
 
     def get_consultation(self, obj):
-        if not hasattr(obj, "consultation"):
+        consultation = get_patient_consultation(obj)
+        if consultation is None:
             return None
-        prescriptions = obj.consultation.prescriptions.all().order_by("id")
+        prescriptions = consultation.prescriptions.all().order_by("id")
         return {
-            "id": obj.consultation.id,
-            "doctor_notes": obj.consultation.doctor_notes,
-            "created_at": obj.consultation.created_at,
+            "id": consultation.id,
+            "doctor_notes": consultation.doctor_notes,
+            "created_at": consultation.created_at,
             "prescriptions": PrescriptionDetailSerializer(prescriptions, many=True).data,
         }
 
     def get_prescriptions(self, obj):
-        if not hasattr(obj, "consultation"):
+        consultation = get_patient_consultation(obj)
+        if consultation is None:
             return []
-        prescriptions = obj.consultation.prescriptions.all().order_by("id")
+        prescriptions = consultation.prescriptions.all().order_by("id")
         return PrescriptionDetailSerializer(prescriptions, many=True).data
 
 
@@ -1780,6 +2133,35 @@ class CampDrugDetailSerializer(serializers.Serializer):
     total_quantity = serializers.IntegerField()
 
 
+class DrugUsageSummarySerializer(serializers.Serializer):
+    drug_name = serializers.CharField()
+    amount = serializers.CharField()
+    total_quantity = serializers.IntegerField()
+    display = serializers.CharField()
+
+
+class ConditionDistributionSerializer(serializers.Serializer):
+    camp = serializers.CharField()
+    condition = serializers.CharField()
+    total_cases = serializers.IntegerField()
+
+
+class CommonConditionSerializer(serializers.Serializer):
+    condition = serializers.CharField()
+    total_cases = serializers.IntegerField()
+
+
+class DrugUsageTrendSerializer(serializers.Serializer):
+    period = serializers.CharField()
+    total_quantity = serializers.IntegerField()
+
+
+class OutcomeSummarySerializer(serializers.Serializer):
+    treated = serializers.IntegerField()
+    referred = serializers.IntegerField()
+    pending = serializers.IntegerField()
+
+
 class StageWaitingCountsSerializer(serializers.Serializer):
     triage = serializers.IntegerField()
     blood_sugar = serializers.IntegerField()
@@ -1789,11 +2171,19 @@ class StageWaitingCountsSerializer(serializers.Serializer):
 
 
 class AdminReportSerializer(serializers.Serializer):
+    period_key = serializers.CharField()
+    period_label = serializers.CharField()
     patients_per_camp = CampPatientSummarySerializer(many=True)
     drugs_issued_per_camp = CampDrugIssuedSummarySerializer(many=True)
     drug_details_per_camp = CampDrugDetailSerializer(many=True)
+    drug_usage_by_name = DrugUsageSummarySerializer(many=True)
+    diagnosis_distribution_per_camp = ConditionDistributionSerializer(many=True)
+    most_common_conditions = CommonConditionSerializer(many=True)
+    drug_usage_trends = DrugUsageTrendSerializer(many=True)
     stage_waiting_counts = StageWaitingCountsSerializer()
     completed_patients = serializers.IntegerField()
+    referral_cases = serializers.IntegerField()
+    outcome_summary = OutcomeSummarySerializer()
 
 
 class StageTimingAnalyticsSerializer(serializers.Serializer):

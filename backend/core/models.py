@@ -172,6 +172,7 @@ class Consultation(models.Model):
     
     # Diagnosis and Management
     diagnosis = models.TextField(blank=True)  # Required for new consultations but blank for existing
+    is_referral_case = models.BooleanField(default=False)
     doctor_notes = models.TextField(blank=True)
     recommendations = models.TextField(blank=True)
     follow_up_instructions = models.TextField(blank=True)
@@ -344,17 +345,56 @@ class Prescription(models.Model):
 
 
 class DrugInventory(models.Model):
-    drug_name = models.CharField(max_length=255, unique=True)
+    camp = models.CharField(max_length=255, default="General")
+    drug_name = models.CharField(max_length=255)
     amount = models.CharField(max_length=50)
     stock_quantity = models.PositiveIntegerField(default=0)
     reorder_level = models.PositiveIntegerField(default=10)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["drug_name"]
+        ordering = ["camp", "drug_name", "amount"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["camp", "drug_name", "amount"],
+                name="unique_inventory_per_camp_drug_amount",
+            )
+        ]
 
     def __str__(self):
-        return f"{self.drug_name} ({self.stock_quantity})"
+        return f"{self.camp} - {self.drug_name} {self.amount} ({self.stock_quantity})"
+
+
+class DrugBatch(models.Model):
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        EXPIRED = "expired", "Expired"
+        DEPLETED = "depleted", "Depleted"
+
+    inventory = models.ForeignKey(
+        DrugInventory,
+        on_delete=models.CASCADE,
+        related_name="batches",
+    )
+    quantity_received = models.PositiveIntegerField()
+    quantity_remaining = models.PositiveIntegerField()
+    expiry_date = models.DateField()
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["expiry_date", "created_at", "id"]
+
+    def __str__(self):
+        return (
+            f"{self.inventory.camp} - {self.inventory.drug_name} "
+            f"{self.inventory.amount} batch ({self.quantity_remaining})"
+        )
 
 
 class AuditLog(models.Model):

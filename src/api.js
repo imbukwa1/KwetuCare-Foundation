@@ -236,8 +236,8 @@ export function fetchAdminPatients(params = "") {
   return apiRequest(`/admin/patients/${params}`);
 }
 
-export function fetchReportSummary() {
-  return apiRequest("/admin/reports/summary/");
+export function fetchReportSummary(period = "1m") {
+  return apiRequest(`/admin/reports/summary/?period=${encodeURIComponent(period)}`);
 }
 
 export function fetchStageTiming() {
@@ -248,6 +248,10 @@ export function fetchInventory(params = "") {
   return apiRequest(`/inventory/${params}`);
 }
 
+export function fetchAvailableDrugs() {
+  return apiRequest("/inventory/available/");
+}
+
 export function createInventory(payload) {
   return apiRequest("/inventory/", {
     method: "POST",
@@ -255,15 +259,15 @@ export function createInventory(payload) {
   });
 }
 
-export function restockInventoryItem(id, amount) {
+export function restockInventoryItem(id, payload) {
   return apiRequest(`/inventory/${id}/restock/`, {
     method: "POST",
-    body: JSON.stringify({ amount }),
+    body: JSON.stringify(payload),
   });
 }
 
-export async function downloadReport() {
-  const response = await authorizedFetch("/admin/reports/export/");
+export async function downloadReport(period = "1m") {
+  const response = await authorizedFetch(`/admin/reports/export/?period=${encodeURIComponent(period)}`);
   if (!response.ok) {
     return parseResponse(response);
   }

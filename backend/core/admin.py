@@ -6,6 +6,7 @@ from .models import (
     BloodSugarCheck,
     Consultation,
     DentalConsultation,
+    DrugBatch,
     DrugInventory,
     GynecologyConsultation,
     NutritionConsultation,
@@ -118,5 +119,12 @@ class AuditLogAdmin(admin.ModelAdmin):
 
 @admin.register(DrugInventory)
 class DrugInventoryAdmin(admin.ModelAdmin):
-    list_display = ("drug_name", "stock_quantity", "reorder_level", "updated_at")
-    search_fields = ("drug_name",)
+    list_display = ("camp", "drug_name", "amount", "stock_quantity", "reorder_level", "updated_at")
+    search_fields = ("camp", "drug_name", "amount")
+
+
+@admin.register(DrugBatch)
+class DrugBatchAdmin(admin.ModelAdmin):
+    list_display = ("inventory", "quantity_received", "quantity_remaining", "expiry_date", "status", "created_at")
+    search_fields = ("inventory__camp", "inventory__drug_name", "inventory__amount")
+    list_filter = ("status", "expiry_date", "inventory__camp")

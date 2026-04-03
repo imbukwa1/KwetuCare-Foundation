@@ -1,14 +1,33 @@
 from django.contrib.auth import get_user_model
+from datetime import timedelta
+import threading
+import time
 from django.db import models
+from django.db import OperationalError
+from django.db import close_old_connections
 from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
+from django.db.utils import ProgrammingError
 from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .models import DrugInventory, Patient, Prescription
+from .models import (
+    Consultation,
+    DentalConsultation,
+    DrugBatch,
+    DrugInventory,
+    GynecologyConsultation,
+    NutritionConsultation,
+    ObstetricConsultation,
+    OpticianConsultation,
+    Patient,
+    PediatricConsultation,
+    Prescription,
+)
 from .permissions import (
     CONSULTATION_ROLES,
     IsAdminUserRole,
@@ -28,12 +47,14 @@ from .permissions import (
     IsRegistrationOfficer,
 )
 from .serializers import (
+    AvailableDrugSerializer,
     BloodSugarCheckSerializer,
     ConsultationCreateSerializer,
     DentalConsultationCreateSerializer,
+    DrugInventoryCreateSerializer,
     DrugInventorySerializer,
     GynecologyConsultationCreateSerializer,
-    InventoryAdjustSerializer,
+    InventoryRestockSerializer,
     ObstetricConsultationCreateSerializer,
     NutritionConsultationCreateSerializer,
     OpticianConsultationCreateSerializer,
@@ -49,56 +70,195 @@ from .serializers import (
     UserSerializer,
     AdminReportSerializer,
     create_audit_log,
+    ensure_consultation_referral_column,
+    get_available_inventory_queryset,
+    PatientRegistrationFileLock,
+    refresh_inventory_totals,
+    safe_refresh_inventory_totals,
+    sync_batch_statuses,
 )
 
 User = get_user_model()
+PATIENT_REGISTRATION_VIEW_LOCK = threading.Lock()
 
 
-def build_admin_report_data():
+REPORT_PERIODS = {
+    "1m": ("Last 1 Month", timedelta(days=30)),
+    "3m": ("Last 3 Months", timedelta(days=90)),
+    "1y": ("Last 1 Year", timedelta(days=365)),
+}
+
+
+def resolve_report_period(period_key):
+    key = period_key if period_key in REPORT_PERIODS else "1m"
+    label, delta = REPORT_PERIODS[key]
+    return key, label, timezone.now() - delta
+
+
+def collect_condition_rows(since):
+    rows = []
+
+    def append_rows(queryset, camp_field, diagnosis_field):
+        for camp, diagnosis in queryset.values_list(camp_field, diagnosis_field):
+            diagnosis_text = (diagnosis or "").strip()
+            if diagnosis_text:
+                rows.append((camp, diagnosis_text))
+
+    append_rows(
+        Consultation.objects.filter(created_at__gte=since),
+        "patient__camp",
+        "diagnosis",
+    )
+    append_rows(
+        PediatricConsultation.objects.filter(created_at__gte=since),
+        "patient__camp",
+        "diagnosis",
+    )
+    append_rows(
+        GynecologyConsultation.objects.filter(created_at__gte=since),
+        "patient__camp",
+        "diagnosis",
+    )
+    append_rows(
+        ObstetricConsultation.objects.filter(created_at__gte=since),
+        "patient__camp",
+        "diagnosis",
+    )
+    append_rows(
+        NutritionConsultation.objects.filter(created_at__gte=since),
+        "patient__camp",
+        "nutrition_diagnosis",
+    )
+    append_rows(
+        OpticianConsultation.objects.filter(created_at__gte=since),
+        "patient__camp",
+        "diagnosis",
+    )
+    append_rows(
+        DentalConsultation.objects.filter(created_at__gte=since),
+        "patient__camp",
+        "diagnosis",
+    )
+    return rows
+
+
+def safe_referral_case_count(since):
+    try:
+        return Consultation.objects.filter(created_at__gte=since, is_referral_case=True).count()
+    except (OperationalError, ProgrammingError):
+        return 0
+
+
+def build_admin_report_data(period_key="1m"):
+    safe_refresh_inventory_totals()
+    period_key, period_label, since = resolve_report_period(period_key)
+    patient_queryset = Patient.objects.filter(created_at__gte=since)
+    dispensed_prescriptions = Prescription.objects.filter(
+        status=Prescription.Status.GIVEN,
+        consultation__created_at__gte=since,
+    )
+
     patients_per_camp = list(
-        Patient.objects.values("camp")
+        patient_queryset.values("camp")
         .annotate(total_patients=Count("id"))
         .order_by("camp")
     )
     drugs_issued_per_camp = list(
-        Prescription.objects.filter(status=Prescription.Status.GIVEN)
+        dispensed_prescriptions
         .values("consultation__patient__camp")
         .annotate(total_drugs_issued=Count("id"))
         .order_by("consultation__patient__camp")
     )
-    inventory_amounts = {
-        item.drug_name.strip().lower(): item.amount
-        for item in DrugInventory.objects.all()
-    }
     drug_details_per_camp = []
     for item in (
-        Prescription.objects.filter(status=Prescription.Status.GIVEN)
-        .values("consultation__patient__camp", "drug_name")
+        dispensed_prescriptions
+        .values("consultation__patient__camp", "drug_name", "dosage")
         .annotate(total_quantity=Sum("quantity"))
-        .order_by("consultation__patient__camp", "drug_name")
+        .order_by("consultation__patient__camp", "drug_name", "dosage")
     ):
         drug_details_per_camp.append(
             {
                 "camp": item["consultation__patient__camp"],
                 "drug_name": item["drug_name"],
-                "amount": inventory_amounts.get(item["drug_name"].strip().lower(), ""),
+                "amount": item["dosage"],
                 "total_quantity": item["total_quantity"] or 0,
             }
         )
+
+    drug_usage_by_name = [
+        {
+            "drug_name": item["drug_name"],
+            "amount": item["dosage"] or "N/A",
+            "total_quantity": item["total_quantity"] or 0,
+            "display": f"{item['drug_name']} - {(item['total_quantity'] or 0)} units of {item['dosage'] or 'N/A'}",
+        }
+        for item in (
+            dispensed_prescriptions.values("drug_name", "dosage")
+            .annotate(total_quantity=Sum("quantity"))
+            .order_by("drug_name", "dosage")
+        )
+    ]
+
+    condition_rows = collect_condition_rows(since)
+    diagnosis_distribution_map = {}
+    common_condition_map = {}
+    for camp, condition in condition_rows:
+        diagnosis_distribution_map[(camp, condition)] = diagnosis_distribution_map.get((camp, condition), 0) + 1
+        common_condition_map[condition] = common_condition_map.get(condition, 0) + 1
+
+    diagnosis_distribution_per_camp = [
+        {"camp": camp, "condition": condition, "total_cases": total}
+        for (camp, condition), total in sorted(
+            diagnosis_distribution_map.items(),
+            key=lambda item: (item[0][0], -item[1], item[0][1]),
+        )
+    ]
+    most_common_conditions = [
+        {"condition": condition, "total_cases": total}
+        for condition, total in sorted(
+            common_condition_map.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+    ][:10]
+
+    trends_map = {}
+    for prescription in dispensed_prescriptions:
+        label = prescription.consultation.created_at.strftime("%Y-%m")
+        trends_map[label] = trends_map.get(label, 0) + prescription.quantity
+    drug_usage_trends = [
+        {"period": period, "total_quantity": total}
+        for period, total in sorted(trends_map.items())
+    ]
+
     stage_waiting_counts = {
-        "triage": Patient.objects.filter(status=Patient.Status.TRIAGE).count(),
-        "blood_sugar": Patient.objects.filter(status=Patient.Status.BLOOD_SUGAR).count(),
-        "doctor": Patient.objects.filter(status=Patient.Status.DOCTOR).count(),
-        "pharmacy": Patient.objects.filter(status=Patient.Status.PHARMACY).count(),
-        "complete": Patient.objects.filter(status=Patient.Status.COMPLETE).count(),
+        "triage": patient_queryset.filter(status=Patient.Status.TRIAGE).count(),
+        "blood_sugar": patient_queryset.filter(status=Patient.Status.BLOOD_SUGAR).count(),
+        "doctor": patient_queryset.filter(status=Patient.Status.DOCTOR).count(),
+        "pharmacy": patient_queryset.filter(status=Patient.Status.PHARMACY).count(),
+        "complete": patient_queryset.filter(status=Patient.Status.COMPLETE).count(),
     }
     completed_patients = stage_waiting_counts["complete"]
+    referral_cases = safe_referral_case_count(since)
+    pending_patients = patient_queryset.exclude(status=Patient.Status.COMPLETE).count()
+    outcome_summary = {
+        "treated": completed_patients,
+        "referred": referral_cases,
+        "pending": pending_patients,
+    }
     return {
+        "period_key": period_key,
+        "period_label": period_label,
         "patients_per_camp": patients_per_camp,
         "drugs_issued_per_camp": drugs_issued_per_camp,
         "drug_details_per_camp": drug_details_per_camp,
+        "drug_usage_by_name": drug_usage_by_name,
+        "diagnosis_distribution_per_camp": diagnosis_distribution_per_camp,
+        "most_common_conditions": most_common_conditions,
+        "drug_usage_trends": drug_usage_trends,
         "stage_waiting_counts": stage_waiting_counts,
         "completed_patients": completed_patients,
+        "referral_cases": referral_cases,
+        "outcome_summary": outcome_summary,
     }
 
 
@@ -161,6 +321,23 @@ class PatientRegistrationView(generics.CreateAPIView):
     serializer_class = PatientRegistrationSerializer
     permission_classes = [permissions.IsAuthenticated, IsRegistrationOfficer]
 
+    def create(self, request, *args, **kwargs):
+        last_error = None
+        with PATIENT_REGISTRATION_VIEW_LOCK:
+            with PatientRegistrationFileLock():
+                for attempt in range(10):
+                    try:
+                        return super().create(request, *args, **kwargs)
+                    except OperationalError as exc:
+                        last_error = exc
+                        if "locked" not in str(exc).lower():
+                            raise
+                        close_old_connections()
+                        time.sleep(min(0.1 * (attempt + 1), 0.75))
+                        continue
+        if last_error is not None:
+            raise last_error
+
 
 class TriageCreateView(generics.CreateAPIView):
     serializer_class = TriageSerializer
@@ -175,6 +352,10 @@ class BloodSugarCheckCreateView(generics.CreateAPIView):
 class ConsultationCreateView(generics.CreateAPIView):
     serializer_class = ConsultationCreateSerializer
     permission_classes = [permissions.IsAuthenticated, IsDoctorUser]
+
+    def create(self, request, *args, **kwargs):
+        ensure_consultation_referral_column()
+        return super().create(request, *args, **kwargs)
 
 
 class DentalConsultationCreateView(generics.CreateAPIView):
@@ -212,6 +393,7 @@ class PharmacyDispenseView(generics.GenericAPIView):
     permission_classes = [permissions.IsAuthenticated, IsPharmacistUser]
 
     def post(self, request, *args, **kwargs):
+        ensure_consultation_referral_column()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         patient = serializer.save()
@@ -289,12 +471,17 @@ class PatientWorkflowDetailView(generics.RetrieveAPIView):
     serializer_class = PatientWorkflowDetailSerializer
     permission_classes = [permissions.IsAuthenticated, IsApprovedUser]
 
+    def get(self, request, *args, **kwargs):
+        ensure_consultation_referral_column()
+        return super().get(request, *args, **kwargs)
+
 
 class AdminReportView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
 
     def get(self, request):
-        serializer = AdminReportSerializer(build_admin_report_data())
+        period_key = request.query_params.get("period", "1m").strip()
+        serializer = AdminReportSerializer(build_admin_report_data(period_key))
         return Response(serializer.data)
 
 
@@ -302,7 +489,8 @@ class AdminReportExportView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
 
     def get(self, request):
-        report_data = build_admin_report_data()
+        period_key = request.query_params.get("period", "1m").strip()
+        report_data = build_admin_report_data(period_key)
         response = HttpResponse(content_type="application/msword")
         response["Content-Disposition"] = 'attachment; filename="kwetu-care-report.doc"'
 
@@ -321,6 +509,22 @@ class AdminReportExportView(APIView):
             )
             for item in report_data["drug_details_per_camp"]
         )
+        drug_usage_rows = "".join(
+            f"<tr><td>{item['drug_name']}</td><td>{item['amount']}</td><td>{item['total_quantity']}</td></tr>"
+            for item in report_data["drug_usage_by_name"]
+        )
+        diagnosis_rows = "".join(
+            f"<tr><td>{item['camp']}</td><td>{item['condition']}</td><td>{item['total_cases']}</td></tr>"
+            for item in report_data["diagnosis_distribution_per_camp"]
+        )
+        common_condition_rows = "".join(
+            f"<tr><td>{item['condition']}</td><td>{item['total_cases']}</td></tr>"
+            for item in report_data["most_common_conditions"]
+        )
+        trend_rows = "".join(
+            f"<tr><td>{item['period']}</td><td>{item['total_quantity']}</td></tr>"
+            for item in report_data["drug_usage_trends"]
+        )
 
         html = f"""
         <html>
@@ -337,7 +541,10 @@ class AdminReportExportView(APIView):
         </head>
         <body>
             <h1>Kwetu Care Report</h1>
+            <p>Reporting period: <strong>{report_data['period_label']}</strong></p>
             <p>Completed patients: <strong>{report_data['completed_patients']}</strong></p>
+            <p>Referral cases: <strong>{report_data['referral_cases']}</strong></p>
+            <p>Outcome summary: treated <strong>{report_data['outcome_summary']['treated']}</strong>, referred <strong>{report_data['outcome_summary']['referred']}</strong>, pending <strong>{report_data['outcome_summary']['pending']}</strong></p>
 
             <h2>Patients Per Camp</h2>
             <table>
@@ -355,6 +562,30 @@ class AdminReportExportView(APIView):
             <table>
                 <tr><th>Camp</th><th>Drug</th><th>Total Quantity</th><th>Amount</th></tr>
                 {detail_rows}
+            </table>
+
+            <h2>Drug Usage By Name</h2>
+            <table>
+                <tr><th>Drug</th><th>Amount</th><th>Total Quantity</th></tr>
+                {drug_usage_rows}
+            </table>
+
+            <h2>Disease Distribution Per Camp</h2>
+            <table>
+                <tr><th>Camp</th><th>Condition</th><th>Patients</th></tr>
+                {diagnosis_rows}
+            </table>
+
+            <h2>Most Common Conditions Across Camps</h2>
+            <table>
+                <tr><th>Condition</th><th>Total Cases</th></tr>
+                {common_condition_rows}
+            </table>
+
+            <h2>Drug Usage Trends Over Time</h2>
+            <table>
+                <tr><th>Period</th><th>Total Quantity Dispensed</th></tr>
+                {trend_rows}
             </table>
         </body>
         </html>
@@ -411,19 +642,23 @@ class AdminStageTimingView(APIView):
 
 
 class DrugInventoryListCreateView(generics.ListCreateAPIView):
-    serializer_class = DrugInventorySerializer
-
     def get_queryset(self):
-        queryset = DrugInventory.objects.all()
+        refresh_inventory_totals()
+        queryset = DrugInventory.objects.all().order_by("drug_name", "amount")
         search = self.request.query_params.get("search", "").strip()
         low_stock = self.request.query_params.get("low_stock", "").strip().lower()
 
         if search:
-            queryset = queryset.filter(drug_name__icontains=search)
+            queryset = queryset.filter(Q(drug_name__icontains=search) | Q(amount__icontains=search))
         if low_stock == "true":
             queryset = queryset.filter(stock_quantity__lte=models.F("reorder_level"))
 
         return queryset
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return DrugInventoryCreateSerializer
+        return DrugInventorySerializer
 
     def get_permissions(self):
         if self.request.method == "GET":
@@ -437,8 +672,25 @@ class DrugInventoryListCreateView(generics.ListCreateAPIView):
         create_audit_log(
             user=self.request.user,
             action="inventory_created",
-            details={"drug_name": inventory.drug_name, "stock_quantity": inventory.stock_quantity},
+            details={
+                "camp": inventory.camp,
+                "drug_name": inventory.drug_name,
+                "amount": inventory.amount,
+                "stock_quantity": inventory.stock_quantity,
+            },
         )
+        self.created_inventory = inventory
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        output = DrugInventorySerializer(self.created_inventory).data
+        headers = self.get_success_headers(output)
+        return Response(output, status=status.HTTP_201_CREATED, headers=headers)
+
+    def post(self, request, *args, **kwargs):
+        return self.create(request, *args, **kwargs)
 
 
 class DrugInventoryUpdateView(generics.RetrieveUpdateAPIView):
@@ -457,18 +709,38 @@ class DrugInventoryUpdateView(generics.RetrieveUpdateAPIView):
 
 class DrugInventoryRestockView(generics.GenericAPIView):
     queryset = DrugInventory.objects.all()
-    serializer_class = InventoryAdjustSerializer
+    serializer_class = InventoryRestockSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
 
     def post(self, request, *args, **kwargs):
         inventory = self.get_object()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        inventory.stock_quantity += serializer.validated_data["amount"]
-        inventory.save(update_fields=["stock_quantity", "updated_at"])
+        DrugBatch.objects.create(
+            inventory=inventory,
+            quantity_received=serializer.validated_data["quantity"],
+            quantity_remaining=serializer.validated_data["quantity"],
+            expiry_date=serializer.validated_data["expiry_date"],
+        )
+        refresh_inventory_totals([inventory.id])
+        inventory.refresh_from_db()
         create_audit_log(
             user=request.user,
             action="inventory_restocked",
-            details={"drug_name": inventory.drug_name, "amount": serializer.validated_data["amount"]},
+            details={
+                "camp": inventory.camp,
+                "drug_name": inventory.drug_name,
+                "amount": inventory.amount,
+                "quantity": serializer.validated_data["quantity"],
+                "expiry_date": str(serializer.validated_data["expiry_date"]),
+            },
         )
         return Response(DrugInventorySerializer(inventory).data, status=status.HTTP_200_OK)
+
+
+class AvailableDrugsView(generics.ListAPIView):
+    serializer_class = AvailableDrugSerializer
+    permission_classes = [permissions.IsAuthenticated, IsInventoryViewer]
+
+    def get_queryset(self):
+        return get_available_inventory_queryset()

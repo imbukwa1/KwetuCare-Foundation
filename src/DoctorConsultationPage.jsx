@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import logo from "./kcf logo.jpeg";
 import "./DoctorConsultationPage.css";
-import { fetchPatientDetail, fetchQueue, submitConsultation } from "./api";
+import { fetchAvailableDrugs, fetchPatientDetail, fetchQueue, submitConsultation } from "./api";
 import useHybridDataSync from "./useHybridDataSync";
 
 const ROLE_LABELS = {
@@ -66,7 +66,7 @@ function PatientList({ patients, onStart }) {
   );
 }
 
-function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
+function ConsultationModal({ isOpen, patient, availableDrugs, availableDrugsLoading, onLoadAvailableDrugs, onClose, onSubmit }) {
   const initialPrescribing = [{ drugName: "", dosage: "", quantity: "", frequency: "", status: "pending" }];
   const initialSurgeries = [{ year: "", indication: "", surgeon: "", complications: "" }];
   const initialHospitalizations = [{ reason: "", outcome: "", year: "" }];
@@ -106,6 +106,7 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
   
   // Diagnosis and Management
   const [diagnosis, setDiagnosis] = useState("");
+  const [isReferralCase, setIsReferralCase] = useState(false);
   const [doctorNotes, setDoctorNotes] = useState("");
   const [prescriptions, setPrescriptions] = useState(initialPrescribing);
   const [recommendations, setRecommendations] = useState("");
@@ -227,6 +228,7 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
           neurological: systemsNeurological,
         },
         diagnosis,
+        isReferralCase,
         doctorNotes,
         prescriptions: prescriptions.map((item) => ({
           drug_name: item.drugName.trim(),
@@ -263,6 +265,7 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
         setSystemsMusculoskeletal("");
         setSystemsNeurological("");
         setDiagnosis("");
+        setIsReferralCase(false);
         setDoctorNotes("");
         setPrescriptions([{ drugName: "", dosage: "", quantity: "", frequency: "", status: "pending" }]);
         setRecommendations("");
@@ -316,6 +319,24 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
                 </label>
               )}
             </div>
+            <div className="doc-actions-inline">
+              <button type="button" className="btn-muted" onClick={() => onLoadAvailableDrugs()}>
+                Drugs Available
+              </button>
+            </div>
+            {availableDrugsLoading && <p className="doc-status-box">Loading available drugs...</p>}
+            {!availableDrugsLoading && availableDrugs.length > 0 && (
+              <div className="available-drugs-panel">
+                <h5>Available Drugs</h5>
+                <ul>
+                  {availableDrugs.map((drug) => (
+                    <li key={`${drug.id}-${drug.amount}`}>
+                      <strong>{drug.drug_name}</strong> - {drug.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
 
           {patient.triage && (
@@ -654,6 +675,14 @@ function ConsultationModal({ isOpen, patient, onClose, onSubmit }) {
               rows={2}
               placeholder="Clinical diagnosis based on findings"
             />
+            <label className="checkbox-label" style={{ marginTop: "1rem" }}>
+              <input
+                type="checkbox"
+                checked={isReferralCase}
+                onChange={(event) => setIsReferralCase(event.target.checked)}
+              />
+              Referral Case
+            </label>
           </div>
 
           {/* Additional Notes */}
@@ -759,6 +788,8 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
   const [pageError, setPageError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
+  const [availableDrugs, setAvailableDrugs] = useState([]);
+  const [availableDrugsLoading, setAvailableDrugsLoading] = useState(false);
 
   const loadQueue = useCallback(async ({ showLoading = false } = {}) => {
     if (showLoading) {
@@ -793,6 +824,7 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
   const startConsultation = useCallback(async (patient) => {
     setPageError("");
     setDetailLoading(true);
+    setAvailableDrugs([]);
     try {
       const detail = await fetchPatientDetail(patient.id);
       setSelectedPatient(detail);
@@ -807,6 +839,19 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
   const closeModal = useCallback(() => {
     setModalOpen(false);
     setSelectedPatient(null);
+    setAvailableDrugs([]);
+  }, []);
+
+  const handleLoadAvailableDrugs = useCallback(async () => {
+    setAvailableDrugsLoading(true);
+    try {
+      const items = await fetchAvailableDrugs();
+      setAvailableDrugs(items);
+    } catch (error) {
+      setPageError(error.message);
+    } finally {
+      setAvailableDrugsLoading(false);
+    }
   }, []);
 
   const handleSubmit = useCallback(async (data) => {
@@ -819,6 +864,7 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
       medicationsAndAllergies: data.medicationsAndAllergies,
       reviewOfSystems: data.reviewOfSystems,
       diagnosis: data.diagnosis,
+      isReferralCase: data.isReferralCase,
       doctorNotes: data.doctorNotes,
       recommendations: data.recommendations,
       followUpInstructions: data.followUpInstructions,
@@ -843,7 +889,15 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
         {lastUpdated && <p className="doc-status-box">Last updated: {lastUpdated.toLocaleTimeString()}</p>}
         {detailLoading && <p className="doc-status-box">Loading patient triage details...</p>}
         {loading ? <p className="doc-status-box">Loading doctor queue...</p> : <PatientList patients={patients} onStart={startConsultation} />}
-        <ConsultationModal isOpen={modalOpen} patient={selectedPatient} onClose={closeModal} onSubmit={handleSubmit} />
+        <ConsultationModal
+          isOpen={modalOpen}
+          patient={selectedPatient}
+          availableDrugs={availableDrugs}
+          availableDrugsLoading={availableDrugsLoading}
+          onLoadAvailableDrugs={handleLoadAvailableDrugs}
+          onClose={closeModal}
+          onSubmit={handleSubmit}
+        />
       </div>
     </div>
   );

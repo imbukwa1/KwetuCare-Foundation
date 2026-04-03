@@ -306,10 +306,9 @@ export default function TriagePage({ currentUser, onLogout }) {
 
   const handleSubmit = useCallback(async (triageData) => {
     setPageError("");
-    const savedTriage = await submitTriage({
+    const triagePayload = {
       patient_id: triageData.patient.id,
       blood_pressure: triageData.bloodPressure,
-      assigned_doctor_type: triageData.requiresBloodSugarCheck ? null : triageData.assignedDoctorType,
       requires_blood_sugar_check: triageData.requiresBloodSugarCheck,
       temperature: triageData.temperature,
       weight: triageData.weight,
@@ -318,7 +317,13 @@ export default function TriagePage({ currentUser, onLogout }) {
       respiratory_rate: triageData.respiratoryRate,
       spo2: triageData.spo2,
       nurse_notes: triageData.notes,
-    });
+    };
+
+    if (!triageData.requiresBloodSugarCheck) {
+      triagePayload.assigned_doctor_type = triageData.assignedDoctorType;
+    }
+
+    const savedTriage = await submitTriage(triagePayload);
 
     setSuccessMessage(
       `Triage data saved for ${triageData.patient.name}. Referred to ${
