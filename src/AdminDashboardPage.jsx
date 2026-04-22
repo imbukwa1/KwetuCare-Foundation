@@ -154,6 +154,27 @@ function StageQueuePanel({ counts }) {
   );
 }
 
+function SpecialistQueuePanel({ counts }) {
+  const cards = [
+    ["Pediatrician", counts.pediatrician || 0],
+    ["Gynecologist", counts.gynecologist || 0],
+    ["Obstetrician", counts.obstetrician || 0],
+    ["Nutritionist", counts.nutritionist || 0],
+    ["Dentist", counts.dental || 0],
+    ["Optician", counts.optician || 0],
+  ];
+  return (
+    <section className="panel">
+      <div className="panel-header"><h2>Patients Waiting Per Specialist</h2></div>
+      <div className="camp-grid">
+        {cards.map(([label, count]) => (
+          <article key={label} className="camp-card"><h4>{label}</h4><p>{count} waiting</p></article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ReportControls({ reportPeriod, setReportPeriod }) {
   return (
     <section className="panel">
@@ -290,7 +311,41 @@ function DrugTrendPanel({ items }) {
   );
 }
 
-function PatientSearchPanel({ patients, search, setSearch }) {
+function ReferralDetailsPanel({ items }) {
+  return (
+    <section className="panel">
+      <div className="panel-header"><h2>Referral Cases</h2></div>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Patient</th>
+            <th>Reg No</th>
+            <th>Camp</th>
+            <th>Diagnosis</th>
+            <th>Referral Details</th>
+            <th>Prescription</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.length === 0 ? (
+            <tr><td colSpan="6">No referral cases in this period.</td></tr>
+          ) : items.map((item, index) => (
+            <tr key={`${item.reg_no}-${index}`}>
+              <td>{item.patient_name}</td>
+              <td>{item.reg_no}</td>
+              <td>{item.camp}</td>
+              <td>{item.diagnosis}</td>
+              <td>{item.referral_details}</td>
+              <td>{item.prescriptions?.join(", ") || "No prescriptions"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function PatientSearchPanel({ patients, search, setSearch, visibleCount, onSeeMore }) {
   return (
     <section className="panel">
       <div className="panel-header"><h2>Patient Search</h2></div>
@@ -313,7 +368,7 @@ function PatientSearchPanel({ patients, search, setSearch }) {
           </tr>
         </thead>
         <tbody>
-          {patients.map((patient) => (
+          {patients.slice(0, visibleCount).map((patient) => (
             <tr key={patient.id}>
               <td>{patient.reg_no}</td>
               <td>{patient.name}</td>
@@ -324,15 +379,41 @@ function PatientSearchPanel({ patients, search, setSearch }) {
           ))}
         </tbody>
       </table>
+      {patients.length > visibleCount && (
+        <div className="action-row" style={{ marginTop: "1rem" }}>
+          <button className="btn-muted" onClick={onSeeMore}>See More</button>
+        </div>
+      )}
     </section>
   );
 }
 
 function InventoryPanel({ inventory, form, setForm, restockAmounts, setRestockAmounts, onCreate, onRestock }) {
+  const categories = [
+    ["analgesics", "Analgesics (Painkillers)"],
+    ["antibiotics", "Antibiotics"],
+    ["antimalarials", "Antimalarials"],
+    ["antihistamines", "Antihistamines"],
+    ["antipyretics", "Antipyretics"],
+    ["antifungals", "Antifungals"],
+    ["antivirals", "Antivirals"],
+    ["gastrointestinal", "Gastrointestinal Drugs"],
+    ["respiratory", "Respiratory Drugs"],
+    ["supplements", "Supplements"],
+    ["vaccines", "Vaccines"],
+    ["hormonal", "Hormonal Drugs"],
+    ["cardiovascular", "Cardiovascular Drugs"],
+    ["other", "Other"],
+  ];
   return (
     <section className="panel">
       <div className="panel-header"><h2>Inventory</h2></div>
       <div className="inventory-form">
+        <select className="admin-input" value={form.category} onChange={(event) => setForm((prev) => ({ ...prev, category: event.target.value }))}>
+          {categories.map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
         <input className="admin-input" placeholder="Drug name" value={form.drug_name} onChange={(event) => setForm((prev) => ({ ...prev, drug_name: event.target.value }))} />
         <input className="admin-input" placeholder="Unit/Dosage e.g. 500mg" value={form.amount} onChange={(event) => setForm((prev) => ({ ...prev, amount: event.target.value }))} />
         <input className="admin-input" placeholder="Batch quantity" type="number" min="1" value={form.stock_quantity} onChange={(event) => setForm((prev) => ({ ...prev, stock_quantity: event.target.value }))} />
@@ -344,6 +425,7 @@ function InventoryPanel({ inventory, form, setForm, restockAmounts, setRestockAm
         <thead>
           <tr>
             <th>Drug</th>
+            <th>Category</th>
             <th>Amount</th>
             <th>Available Stock</th>
             <th>Reorder Level</th>
@@ -356,6 +438,7 @@ function InventoryPanel({ inventory, form, setForm, restockAmounts, setRestockAm
           {inventory.map((item) => (
             <tr key={item.id}>
               <td>{item.drug_name}</td>
+              <td>{item.category_label || item.category}</td>
               <td>{item.amount}</td>
               <td>{item.stock_quantity}</td>
               <td>{item.reorder_level}</td>
@@ -422,14 +505,17 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
     most_common_conditions: [],
     drug_usage_trends: [],
     stage_waiting_counts: {},
+    specialist_waiting_counts: {},
     completed_patients: 0,
     referral_cases: 0,
     outcome_summary: { treated: 0, referred: 0, pending: 0 },
+    referral_case_details: [],
   });
   const [patients, setPatients] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [search, setSearch] = useState("");
   const [inventoryForm, setInventoryForm] = useState({
+    category: "analgesics",
     drug_name: "",
     amount: "",
     stock_quantity: "",
@@ -440,6 +526,7 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
   const [statusMessage, setStatusMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [visiblePatientsCount, setVisiblePatientsCount] = useState(10);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [reportPeriod, setReportPeriod] = useState("1m");
   const hasInitializedSearchRef = useRef(false);
@@ -448,6 +535,7 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       setDebouncedSearch(search);
+      setVisiblePatientsCount(10);
     }, 350);
     return () => clearTimeout(timeoutId);
   }, [search]);
@@ -559,12 +647,13 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
     try {
       await createInventory({
         drug_name: inventoryForm.drug_name,
+        category: inventoryForm.category,
         amount: inventoryForm.amount,
         stock_quantity: Number(inventoryForm.stock_quantity),
         reorder_level: Number(inventoryForm.reorder_level),
         expiry_date: inventoryForm.expiry_date,
       });
-      setInventoryForm({ drug_name: "", amount: "", stock_quantity: "", reorder_level: "", expiry_date: "" });
+      setInventoryForm({ category: inventoryForm.category, drug_name: "", amount: "", stock_quantity: "", reorder_level: "", expiry_date: "" });
       setStatusMessage("Inventory item created.");
       await refresh({ source: "after-create-inventory" });
     } catch (actionError) {
@@ -597,12 +686,19 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
     }
   }, [reportPeriod]);
 
+  const lowStockItems = inventory.filter((item) => item.is_low_stock);
+
   return (
     <div className="admin-page">
       <div className="admin-container">
         <Header currentUser={currentUser} onLogout={onLogout} onDownloadReport={handleDownloadReport} />
         {statusMessage && <p className="admin-status-success">{statusMessage}</p>}
         {error && <p className="admin-error">{error}</p>}
+        {lowStockItems.length > 0 && (
+          <p className="admin-error">
+            Low stock alert: {lowStockItems.map((item) => `${item.drug_name} ${item.amount}`).join(", ")}
+          </p>
+        )}
         {lastUpdated && <p className="admin-status-box">Last updated: {lastUpdated.toLocaleTimeString()}</p>}
         {loading && <p className="admin-status-box">Loading admin dashboard...</p>}
         <ReportControls reportPeriod={reportPeriod} setReportPeriod={setReportPeriod} />
@@ -616,8 +712,16 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
         <DiagnosisDistributionPanel items={summary.diagnosis_distribution_per_camp || []} />
         <CommonConditionsPanel items={summary.most_common_conditions || []} />
         <DrugTrendPanel items={summary.drug_usage_trends || []} />
+        <ReferralDetailsPanel items={summary.referral_case_details || []} />
         <StageQueuePanel counts={summary.stage_waiting_counts || {}} />
-        <PatientSearchPanel patients={patients} search={search} setSearch={setSearch} />
+        <SpecialistQueuePanel counts={summary.specialist_waiting_counts || {}} />
+        <PatientSearchPanel
+          patients={patients}
+          search={search}
+          setSearch={setSearch}
+          visibleCount={visiblePatientsCount}
+          onSeeMore={() => setVisiblePatientsCount((prev) => prev + 10)}
+        />
         <InventoryPanel
           inventory={inventory}
           form={inventoryForm}

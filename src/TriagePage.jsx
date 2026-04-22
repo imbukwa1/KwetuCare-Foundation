@@ -94,14 +94,8 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
 
   const isFormValid = useMemo(() => {
     return (
-      form.bloodPressure.trim() !== "" &&
       (form.requiresBloodSugarCheck || form.assignedDoctorType.trim() !== "") &&
-      form.heartRate.trim() !== "" &&
-      form.respiratoryRate.trim() !== "" &&
-      form.spo2.trim() !== "" &&
-      form.temperature.trim() !== "" &&
-      form.weight.trim() !== "" &&
-      form.height.trim() !== ""
+      true
     );
   }, [form]);
 
@@ -134,12 +128,12 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
         bloodPressure: form.bloodPressure.trim(),
         requiresBloodSugarCheck: form.requiresBloodSugarCheck,
         assignedDoctorType: form.assignedDoctorType,
-        heartRate: Number(form.heartRate),
-        respiratoryRate: Number(form.respiratoryRate),
-        spo2: Number(form.spo2),
-        temperature: Number(form.temperature),
-        weight: Number(form.weight),
-        height: Number(form.height),
+        heartRate: form.heartRate.trim() === "" ? null : Number(form.heartRate),
+        respiratoryRate: form.respiratoryRate.trim() === "" ? null : Number(form.respiratoryRate),
+        spo2: form.spo2.trim() === "" ? null : Number(form.spo2),
+        temperature: form.temperature.trim() === "" ? null : Number(form.temperature),
+        weight: form.weight.trim() === "" ? null : Number(form.weight),
+        height: form.height.trim() === "" ? null : Number(form.height),
         notes: form.notes,
       })
     )
@@ -176,12 +170,12 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
         </div>
         <form onSubmit={submit} className="modal-form">
           <label>
-            Blood Pressure *
+            Blood Pressure
             <input
               type="text"
               value={form.bloodPressure}
               onChange={handleField("bloodPressure")}
-              placeholder="e.g. 120/80"
+              placeholder="Optional e.g. 120/80"
             />
           </label>
           <label className="triage-checkbox-row">
@@ -205,11 +199,11 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
             </label>
           )}
           <label>
-            Heart Rate (bpm) *
+            Heart Rate (bpm)
             <input type="number" value={form.heartRate} onChange={handleField("heartRate")} placeholder="e.g. 82" />
           </label>
           <label>
-            Respiratory Rate (RR) *
+            Respiratory Rate (RR)
             <input
               type="number"
               value={form.respiratoryRate}
@@ -218,20 +212,20 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
             />
           </label>
           <label>
-            Oxygen Saturation (SpO2) *
+            Oxygen Saturation (SpO2)
             <input type="number" value={form.spo2} onChange={handleField("spo2")} placeholder="e.g. 98" />
           </label>
           <label>
-            Temperature (C) *
+            Temperature (C)
             <input type="number" value={form.temperature} step="0.1" onChange={handleField("temperature")} placeholder="e.g. 36.8" />
           </label>
           <label>
-            Weight (kg) *
+            Weight (kg)
             <input type="number" value={form.weight} step="0.1" onChange={handleField("weight")} placeholder="e.g. 64" />
           </label>
           <label>
-            Height (m) *
-            <input type="number" value={form.height} step="0.01" onChange={handleField("height")} placeholder="e.g. 1.25" />
+            Height (m)
+            <input type="number" value={form.height} step="0.01" min="0.1" onChange={handleField("height")} placeholder="e.g. 0.45 or 1.25" />
           </label>
           <label>
             BMI
@@ -246,7 +240,7 @@ function TriageModal({ isOpen, patient, onClose, onSubmit }) {
             <button type="button" className="btn-muted" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="btn-primary" disabled={!isFormValid || isSubmitting}>
+            <button type="submit" className="btn-primary" disabled={isSubmitting}>
               {isSubmitting ? "Submitting..." : "Submit"}
             </button>
           </div>

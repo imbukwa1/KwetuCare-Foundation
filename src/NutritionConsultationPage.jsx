@@ -2,13 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import logo from "./kcf logo.jpeg";
 import "./DoctorConsultationPage.css";
 import {
+  fetchAvailableDrugs,
   fetchPatientDetail,
   fetchQueue,
   submitNutritionConsultation,
 } from "./api";
 import useHybridDataSync from "./useHybridDataSync";
+import DrugAvailabilityPanel from "./DrugAvailabilityPanel";
+import PrescriptionEditor from "./PrescriptionEditor";
 
-const INITIAL_PRESCRIPTION = [{ drugName: "", dosage: "", quantity: "", frequency: "", status: "pending" }];
+const INITIAL_PRESCRIPTION = [{ inventoryId: "", drugName: "", dosage: "", quantity: "", frequency: "", status: "pending" }];
 const INITIAL_FORM = {
   presentingComplaint: "",
   dietaryHistory: "",
@@ -76,7 +79,7 @@ function SectionGuide({ children }) {
   return <p className="pediatric-section-guide">{children}</p>;
 }
 
-function NutritionModal({ isOpen, patient, onClose, onSubmit }) {
+function NutritionModal({ isOpen, patient, availableDrugs, availableDrugsLoading, onLoadAvailableDrugs, onClose, onSubmit }) {
   const [form, setForm] = useState(INITIAL_FORM);
   const [prescriptions, setPrescriptions] = useState(INITIAL_PRESCRIPTION);
   const [error, setError] = useState("");
@@ -91,24 +94,34 @@ function NutritionModal({ isOpen, patient, onClose, onSubmit }) {
     }
   }, [isOpen, patient]);
 
-  const isSectionComplete = useMemo(
-    () => Object.values(form).every((value) => value.toString().trim() !== ""),
-    [form]
+  const validPrescriptions = useMemo(
+    () =>
+      prescriptions.filter(
+        (item) =>
+          item.drugName.trim() !== "" ||
+          item.dosage.trim() !== "" ||
+          item.quantity.toString().trim() !== "" ||
+          item.frequency.trim() !== ""
+      ),
+    [prescriptions]
   );
 
   const isPrescriptionValid = useMemo(
     () =>
-      prescriptions.every(
+      validPrescriptions.every(
         (item) =>
           item.drugName.trim() !== "" &&
           item.dosage.trim() !== "" &&
           item.quantity.toString().trim() !== "" &&
           item.frequency.trim() !== ""
       ),
-    [prescriptions]
+    [validPrescriptions]
   );
 
-  const isFormValid = !!patient && isSectionComplete && isPrescriptionValid;
+  const hasAnyContent = useMemo(
+    () => Object.values(form).some((value) => value.toString().trim() !== "") || validPrescriptions.length > 0,
+    [form, validPrescriptions.length]
+  );
 
   const handleField = (field) => (event) => {
     setForm((prev) => ({ ...prev, [field]: event.target.value }));
@@ -123,7 +136,7 @@ function NutritionModal({ isOpen, patient, onClose, onSubmit }) {
   };
 
   const addPrescription = () => {
-    setPrescriptions((prev) => [...prev, { drugName: "", dosage: "", quantity: "", frequency: "", status: "pending" }]);
+    setPrescriptions((prev) => [...prev, { inventoryId: "", drugName: "", dosage: "", quantity: "", frequency: "", status: "pending" }]);
   };
 
   const removePrescription = (index) => {
@@ -132,8 +145,13 @@ function NutritionModal({ isOpen, patient, onClose, onSubmit }) {
 
   const submit = (event) => {
     event.preventDefault();
-    if (!isFormValid) {
-      setError("Complete all nutrition sections and prescriptions.");
+    if (!hasAnyContent) {
+      setError("The nutrition consultation form is empty.");
+      return;
+    }
+
+    if (!isPrescriptionValid) {
+      setError("Complete every prescription row or clear the unfinished row.");
       return;
     }
 
@@ -152,7 +170,7 @@ function NutritionModal({ isOpen, patient, onClose, onSubmit }) {
         nutrition_diagnosis: form.nutritionDiagnosis,
         risk_level: form.riskLevel,
         nutrition_plan: form.nutritionPlan,
-        prescriptions: prescriptions.map((item) => ({
+        prescriptions: validPrescriptions.map((item) => ({
           drug_name: item.drugName.trim(),
           dosage: item.dosage.trim(),
           quantity: Number(item.quantity),
@@ -185,6 +203,13 @@ function NutritionModal({ isOpen, patient, onClose, onSubmit }) {
               <label><span>Camp</span><input value={patient.camp} readOnly /></label>
               <label><span>Priority</span><input value={patient.priority} readOnly /></label>
             </div>
+            <div className="doc-actions-inline">
+              <button type="button" className="btn-muted" onClick={() => onLoadAvailableDrugs()}>
+                Drugs Available
+              </button>
+            </div>
+            {availableDrugsLoading && <p className="doc-status-box">Loading available drugs...</p>}
+            {!availableDrugsLoading && <DrugAvailabilityPanel drugs={availableDrugs} />}
           </div>
 
           {patient.triage && (
@@ -276,28 +301,13 @@ function NutritionModal({ isOpen, patient, onClose, onSubmit }) {
 
           <div className="doc-section">
             <h4>Prescriptions</h4>
-            {prescriptions.map((prescription, index) => (
-              <div className="prescription-row" key={index}>
-                <input value={prescription.drugName} onChange={(event) => updatePrescriptionField(index, "drugName", event.target.value)} placeholder="Drug Name" />
-                <input value={prescription.dosage} onChange={(event) => updatePrescriptionField(index, "dosage", event.target.value)} placeholder="Dosage/Strength" />
-                <input type="number" min="1" value={prescription.quantity} onChange={(event) => updatePrescriptionField(index, "quantity", event.target.value)} placeholder="Quantity" />
-                <select value={prescription.frequency} onChange={(event) => updatePrescriptionField(index, "frequency", event.target.value)}>
-                  <option value="">Frequency</option>
-                  <option value="once daily">Once daily</option>
-                  <option value="twice daily">Twice daily</option>
-                  <option value="three times daily">Three times daily</option>
-                  <option value="as needed">As needed</option>
-                </select>
-                {prescriptions.length > 1 && (
-                  <button type="button" className="btn-remove" onClick={() => removePrescription(index)}>
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-            <button type="button" className="btn-muted" onClick={addPrescription}>
-              + Add Drug
-            </button>
+            <PrescriptionEditor
+              prescriptions={prescriptions}
+              availableDrugs={availableDrugs}
+              updatePrescriptionField={updatePrescriptionField}
+              addPrescription={addPrescription}
+              removePrescription={removePrescription}
+            />
           </div>
 
           {error && <p className="doc-error">{error}</p>}
@@ -306,7 +316,7 @@ function NutritionModal({ isOpen, patient, onClose, onSubmit }) {
             <button type="button" className="btn-muted" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="btn-maroon" disabled={!isFormValid || isSubmitting}>
+            <button type="submit" className="btn-maroon" disabled={isSubmitting}>
               {isSubmitting ? "Submitting..." : "Submit Nutrition Consultation"}
             </button>
           </div>
@@ -323,6 +333,8 @@ export default function NutritionConsultationPage({ currentUser, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [availableDrugs, setAvailableDrugs] = useState([]);
+  const [availableDrugsLoading, setAvailableDrugsLoading] = useState(false);
 
   const loadQueue = useCallback(async ({ showLoading = false } = {}) => {
     if (showLoading) {
@@ -355,9 +367,11 @@ export default function NutritionConsultationPage({ currentUser, onLogout }) {
 
   const openConsultation = useCallback(async (patient) => {
     setPageError("");
+    setAvailableDrugs([]);
     try {
-      const detail = await fetchPatientDetail(patient.id);
+      const [detail, items] = await Promise.all([fetchPatientDetail(patient.id), fetchAvailableDrugs()]);
       setSelectedPatient(detail);
+      setAvailableDrugs(items);
       setModalOpen(true);
     } catch (error) {
       setPageError(error.message);
@@ -367,6 +381,19 @@ export default function NutritionConsultationPage({ currentUser, onLogout }) {
   const closeModal = useCallback(() => {
     setModalOpen(false);
     setSelectedPatient(null);
+    setAvailableDrugs([]);
+  }, []);
+
+  const handleLoadAvailableDrugs = useCallback(async () => {
+    setAvailableDrugsLoading(true);
+    try {
+      const items = await fetchAvailableDrugs();
+      setAvailableDrugs(items);
+    } catch (error) {
+      setPageError(error.message);
+    } finally {
+      setAvailableDrugsLoading(false);
+    }
   }, []);
 
   const handleSubmit = useCallback(async (payload) => {
@@ -384,7 +411,15 @@ export default function NutritionConsultationPage({ currentUser, onLogout }) {
         {pageError && <p className="doc-error">{pageError}</p>}
         {lastUpdated && <p className="doc-status-box">Last updated: {lastUpdated.toLocaleTimeString()}</p>}
         {loading ? <p className="doc-status-box">Loading nutrition queue...</p> : <PatientList patients={patients} onStart={openConsultation} />}
-        <NutritionModal isOpen={modalOpen} patient={selectedPatient} onClose={closeModal} onSubmit={handleSubmit} />
+        <NutritionModal
+          isOpen={modalOpen}
+          patient={selectedPatient}
+          availableDrugs={availableDrugs}
+          availableDrugsLoading={availableDrugsLoading}
+          onLoadAvailableDrugs={handleLoadAvailableDrugs}
+          onClose={closeModal}
+          onSubmit={handleSubmit}
+        />
       </div>
     </div>
   );

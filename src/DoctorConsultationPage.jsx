@@ -3,6 +3,8 @@ import logo from "./kcf logo.jpeg";
 import "./DoctorConsultationPage.css";
 import { fetchAvailableDrugs, fetchPatientDetail, fetchQueue, submitConsultation } from "./api";
 import useHybridDataSync from "./useHybridDataSync";
+import DrugAvailabilityPanel from "./DrugAvailabilityPanel";
+import PrescriptionEditor from "./PrescriptionEditor";
 
 const ROLE_LABELS = {
   general_doctor: "General Doctor",
@@ -117,6 +119,44 @@ function ConsultationModal({ isOpen, patient, availableDrugs, availableDrugsLoad
 
   const hasPatient = !!patient;
 
+  const resetForm = useCallback(() => {
+    setSelectedConditions([]);
+    setOnMedication("no");
+    setMedicationDetails("");
+    setIllnessOnset("");
+    setIllnessSeverity("moderate");
+    setIllnessLocation("");
+    setAssociatedSymptoms("");
+    setChronicIllnesses("");
+    setSurgeries([{ year: "", indication: "", surgeon: "", complications: "" }]);
+    setHospitalizations([{ reason: "", outcome: "", year: "" }]);
+    setSignificantInfections("");
+    setFamilyHistory("");
+    setCurrentMedications("");
+    setDrugAllergies("");
+    setFoodAllergies("");
+    setSystemsHeent("");
+    setSystemsCardiovascular("");
+    setSystemsRespiratory("");
+    setSystemsGastrointestinal("");
+    setSystemsMusculoskeletal("");
+    setSystemsNeurological("");
+    setDiagnosis("");
+    setIsReferralCase(false);
+    setDoctorNotes("");
+    setPrescriptions([{ inventoryId: "", drugName: "", dosage: "", quantity: "", frequency: "", status: "pending" }]);
+    setRecommendations("");
+    setFollowUpInstructions("");
+    setError("");
+    setIsSubmitting(false);
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      resetForm();
+    }
+  }, [isOpen, patient?.id, resetForm]);
+
   const toggleCondition = (condition) => {
     setSelectedConditions((prev) => 
       prev.includes(condition) ? prev.filter(c => c !== condition) : [...prev, condition]
@@ -155,17 +195,35 @@ function ConsultationModal({ isOpen, patient, availableDrugs, availableDrugsLoad
     setHospitalizations((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
   };
 
+  const validPrescriptions = useMemo(
+    () =>
+      prescriptions.filter(
+        (item) =>
+          item.drugName.trim() !== "" ||
+          item.dosage.trim() !== "" ||
+          item.quantity.toString().trim() !== "" ||
+          item.frequency.trim() !== ""
+      ),
+    [prescriptions]
+  );
+
   const isPrescriptionValid = useMemo(() => {
-    return prescriptions.every(
+    return validPrescriptions.every(
       (item) =>
         item.drugName.trim() !== "" &&
         item.dosage.trim() !== "" &&
         item.quantity.toString().trim() !== "" &&
         item.frequency.trim() !== ""
     );
-  }, [prescriptions]);
+  }, [validPrescriptions]);
 
-  const isFormValid = hasPatient && diagnosis.trim() !== "" && isPrescriptionValid;
+  const hasClinicalContent =
+    diagnosis.trim() !== "" ||
+    doctorNotes.trim() !== "" ||
+    validPrescriptions.length > 0 ||
+    associatedSymptoms.trim() !== "" ||
+    illnessOnset.trim() !== "" ||
+    illnessLocation.trim() !== "";
 
   const updatePrescriptionField = (index, field, value) => {
     setPrescriptions((prev) => {
@@ -176,7 +234,7 @@ function ConsultationModal({ isOpen, patient, availableDrugs, availableDrugsLoad
   };
 
   const addPrescription = () => {
-    setPrescriptions((prev) => [...prev, { drugName: "", dosage: "", quantity: "", frequency: "", status: "pending" }]);
+    setPrescriptions((prev) => [...prev, { inventoryId: "", drugName: "", dosage: "", quantity: "", frequency: "", status: "pending" }]);
   };
 
   const removePrescription = (index) => {
@@ -185,8 +243,13 @@ function ConsultationModal({ isOpen, patient, availableDrugs, availableDrugsLoad
 
   const submit = (event) => {
     event.preventDefault();
-    if (!isFormValid) {
-      setError("Please complete the clinical diagnosis and all prescriptions.");
+    if (!hasClinicalContent) {
+      setError("The consultation form is empty.");
+      return;
+    }
+
+    if (!isPrescriptionValid) {
+      setError("Complete every prescription row or clear the unfinished row.");
       return;
     }
 
@@ -230,7 +293,7 @@ function ConsultationModal({ isOpen, patient, availableDrugs, availableDrugsLoad
         diagnosis,
         isReferralCase,
         doctorNotes,
-        prescriptions: prescriptions.map((item) => ({
+        prescriptions: validPrescriptions.map((item) => ({
           drug_name: item.drugName.trim(),
           dosage: item.dosage.trim(),
           quantity: Number(item.quantity),
@@ -241,36 +304,7 @@ function ConsultationModal({ isOpen, patient, availableDrugs, availableDrugsLoad
         followUpInstructions,
       })
     )
-      .then(() => {
-        // Reset all fields
-        setSelectedConditions([]);
-        setOnMedication("no");
-        setMedicationDetails("");
-        setIllnessOnset("");
-        setIllnessSeverity("moderate");
-        setIllnessLocation("");
-        setAssociatedSymptoms("");
-        setChronicIllnesses("");
-        setSurgeries([{ year: "", indication: "", surgeon: "", complications: "" }]);
-        setHospitalizations([{ reason: "", outcome: "", year: "" }]);
-        setSignificantInfections("");
-        setFamilyHistory("");
-        setCurrentMedications("");
-        setDrugAllergies("");
-        setFoodAllergies("");
-        setSystemsHeent("");
-        setSystemsCardiovascular("");
-        setSystemsRespiratory("");
-        setSystemsGastrointestinal("");
-        setSystemsMusculoskeletal("");
-        setSystemsNeurological("");
-        setDiagnosis("");
-        setIsReferralCase(false);
-        setDoctorNotes("");
-        setPrescriptions([{ drugName: "", dosage: "", quantity: "", frequency: "", status: "pending" }]);
-        setRecommendations("");
-        setFollowUpInstructions("");
-      })
+      .then(() => resetForm())
       .catch((submitError) => {
         setError(submitError.message);
       })
@@ -325,18 +359,7 @@ function ConsultationModal({ isOpen, patient, availableDrugs, availableDrugsLoad
               </button>
             </div>
             {availableDrugsLoading && <p className="doc-status-box">Loading available drugs...</p>}
-            {!availableDrugsLoading && availableDrugs.length > 0 && (
-              <div className="available-drugs-panel">
-                <h5>Available Drugs</h5>
-                <ul>
-                  {availableDrugs.map((drug) => (
-                    <li key={`${drug.id}-${drug.amount}`}>
-                      <strong>{drug.drug_name}</strong> - {drug.label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            {!availableDrugsLoading && <DrugAvailabilityPanel drugs={availableDrugs} />}
           </div>
 
           {patient.triage && (
@@ -379,6 +402,26 @@ function ConsultationModal({ isOpen, patient, availableDrugs, availableDrugsLoad
               <label>
                 Nurse Notes
                 <textarea value={patient.triage.nurse_notes || ""} rows={3} readOnly />
+              </label>
+            </div>
+          )}
+
+          {patient.blood_sugar_check && (
+            <div className="doc-section">
+              <h4>Blood Sugar Check</h4>
+              <div className="doc-info-grid">
+                <label>
+                  Blood Sugar Level
+                  <input value={patient.blood_sugar_check.blood_sugar_level || ""} readOnly />
+                </label>
+                <label>
+                  Test Type
+                  <input value={patient.blood_sugar_check.test_type || ""} readOnly />
+                </label>
+              </div>
+              <label>
+                Blood Sugar Notes
+                <textarea value={patient.blood_sugar_check.notes || ""} rows={3} readOnly />
               </label>
             </div>
           )}
@@ -703,45 +746,13 @@ function ConsultationModal({ isOpen, patient, availableDrugs, availableDrugsLoad
               Medications (Prescriptions)
               <p style={{ fontSize: "0.9em", color: "#666", marginTop: "0.5em" }}>Add all prescribed medications below:</p>
             </label>
-            {prescriptions.map((prescription, index) => (
-              <div className="prescription-row" key={index}>
-                <input
-                  value={prescription.drugName}
-                  onChange={(event) => updatePrescriptionField(index, "drugName", event.target.value)}
-                  placeholder="Drug Name"
-                />
-                <input
-                  value={prescription.dosage}
-                  onChange={(event) => updatePrescriptionField(index, "dosage", event.target.value)}
-                  placeholder="Dosage/Strength"
-                />
-                <input
-                  type="number"
-                  min="1"
-                  value={prescription.quantity}
-                  onChange={(event) => updatePrescriptionField(index, "quantity", event.target.value)}
-                  placeholder="Quantity"
-                />
-                <select
-                  value={prescription.frequency}
-                  onChange={(event) => updatePrescriptionField(index, "frequency", event.target.value)}
-                >
-                  <option value="">Frequency</option>
-                  <option value="once daily">Once daily</option>
-                  <option value="twice daily">Twice daily</option>
-                  <option value="three times daily">Three times daily</option>
-                  <option value="as needed">As needed</option>
-                </select>
-                {prescriptions.length > 1 && (
-                  <button type="button" className="btn-remove" onClick={() => removePrescription(index)}>
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-            <button type="button" className="btn-muted" onClick={addPrescription}>
-              + Add Drug
-            </button>
+            <PrescriptionEditor
+              prescriptions={prescriptions}
+              availableDrugs={availableDrugs}
+              updatePrescriptionField={updatePrescriptionField}
+              addPrescription={addPrescription}
+              removePrescription={removePrescription}
+            />
 
             <label style={{ marginTop: "1em" }}>
               Recommendations
@@ -770,7 +781,7 @@ function ConsultationModal({ isOpen, patient, availableDrugs, availableDrugsLoad
             <button type="button" className="btn-muted" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="btn-maroon" disabled={!isFormValid || isSubmitting}>
+            <button type="submit" className="btn-maroon" disabled={isSubmitting}>
               {isSubmitting ? "Submitting..." : "Submit Consultation"}
             </button>
           </div>
@@ -826,8 +837,9 @@ export default function DoctorConsultationPage({ currentUser, onLogout }) {
     setDetailLoading(true);
     setAvailableDrugs([]);
     try {
-      const detail = await fetchPatientDetail(patient.id);
+      const [detail, items] = await Promise.all([fetchPatientDetail(patient.id), fetchAvailableDrugs()]);
       setSelectedPatient(detail);
+      setAvailableDrugs(items);
       setModalOpen(true);
     } catch (error) {
       setPageError(error.message);

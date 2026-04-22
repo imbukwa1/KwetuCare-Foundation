@@ -345,7 +345,28 @@ class Prescription(models.Model):
 
 
 class DrugInventory(models.Model):
+    class Category(models.TextChoices):
+        ANALGESICS = "analgesics", "Analgesics (Painkillers)"
+        ANTIBIOTICS = "antibiotics", "Antibiotics"
+        ANTIMALARIALS = "antimalarials", "Antimalarials"
+        ANTIHISTAMINES = "antihistamines", "Antihistamines"
+        ANTIPYRETICS = "antipyretics", "Antipyretics"
+        ANTIFUNGALS = "antifungals", "Antifungals"
+        ANTIVIRALS = "antivirals", "Antivirals"
+        GASTROINTESTINAL = "gastrointestinal", "Gastrointestinal Drugs"
+        RESPIRATORY = "respiratory", "Respiratory Drugs"
+        SUPPLEMENTS = "supplements", "Supplements"
+        VACCINES = "vaccines", "Vaccines"
+        HORMONAL = "hormonal", "Hormonal Drugs"
+        CARDIOVASCULAR = "cardiovascular", "Cardiovascular Drugs"
+        OTHER = "other", "Other"
+
     camp = models.CharField(max_length=255, default="General")
+    category = models.CharField(
+        max_length=30,
+        choices=Category.choices,
+        default=Category.OTHER,
+    )
     drug_name = models.CharField(max_length=255)
     amount = models.CharField(max_length=50)
     stock_quantity = models.PositiveIntegerField(default=0)
@@ -353,7 +374,7 @@ class DrugInventory(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["camp", "drug_name", "amount"]
+        ordering = ["category", "drug_name", "amount"]
         constraints = [
             models.UniqueConstraint(
                 fields=["camp", "drug_name", "amount"],
@@ -362,7 +383,7 @@ class DrugInventory(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.camp} - {self.drug_name} {self.amount} ({self.stock_quantity})"
+        return f"{self.get_category_display()} - {self.drug_name} {self.amount} ({self.stock_quantity})"
 
 
 class DrugBatch(models.Model):

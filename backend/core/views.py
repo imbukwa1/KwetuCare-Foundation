@@ -237,6 +237,14 @@ def build_admin_report_data(period_key="1m"):
         "pharmacy": patient_queryset.filter(status=Patient.Status.PHARMACY).count(),
         "complete": patient_queryset.filter(status=Patient.Status.COMPLETE).count(),
     }
+    specialist_waiting_counts = {
+        "pediatrician": patient_queryset.filter(status=Patient.Status.DOCTOR, assigned_doctor_type=Patient.DoctorType.PEDIATRICIAN).count(),
+        "gynecologist": patient_queryset.filter(status=Patient.Status.DOCTOR, assigned_doctor_type=Patient.DoctorType.GYNECOLOGIST).count(),
+        "obstetrician": patient_queryset.filter(status=Patient.Status.DOCTOR, assigned_doctor_type=Patient.DoctorType.OBSTETRICIAN).count(),
+        "nutritionist": patient_queryset.filter(status=Patient.Status.DOCTOR, assigned_doctor_type=Patient.DoctorType.NUTRITIONIST).count(),
+        "dental": patient_queryset.filter(status=Patient.Status.DOCTOR, assigned_doctor_type=Patient.DoctorType.DENTAL).count(),
+        "optician": patient_queryset.filter(status=Patient.Status.DOCTOR, assigned_doctor_type=Patient.DoctorType.OPTICIAN).count(),
+    }
     completed_patients = stage_waiting_counts["complete"]
     referral_cases = safe_referral_case_count(since)
     pending_patients = patient_queryset.exclude(status=Patient.Status.COMPLETE).count()
@@ -245,6 +253,21 @@ def build_admin_report_data(period_key="1m"):
         "referred": referral_cases,
         "pending": pending_patients,
     }
+    referral_case_details = []
+    for consultation in Consultation.objects.filter(created_at__gte=since, is_referral_case=True).select_related("patient").prefetch_related("prescriptions"):
+        referral_case_details.append(
+            {
+                "patient_name": consultation.patient.name,
+                "reg_no": consultation.patient.reg_no,
+                "camp": consultation.patient.camp,
+                "diagnosis": (consultation.diagnosis or "").strip() or "N/A",
+                "referral_details": (consultation.doctor_notes or consultation.recommendations or consultation.follow_up_instructions or "").strip() or "Referral case flagged for follow-up.",
+                "prescriptions": [
+                    f"{item.drug_name} - {item.quantity} of {item.dosage} ({item.frequency})"
+                    for item in consultation.prescriptions.all().order_by("id")
+                ],
+            }
+        )
     return {
         "period_key": period_key,
         "period_label": period_label,
@@ -256,9 +279,11 @@ def build_admin_report_data(period_key="1m"):
         "most_common_conditions": most_common_conditions,
         "drug_usage_trends": drug_usage_trends,
         "stage_waiting_counts": stage_waiting_counts,
+        "specialist_waiting_counts": specialist_waiting_counts,
         "completed_patients": completed_patients,
         "referral_cases": referral_cases,
         "outcome_summary": outcome_summary,
+        "referral_case_details": referral_case_details,
     }
 
 
@@ -405,13 +430,7 @@ class AdminPatientListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
 
     def get_queryset(self):
-        queryset = Patient.objects.annotate(
-            priority_rank=Case(
-                When(priority=Patient.Priority.URGENT, then=Value(0)),
-                default=Value(1),
-                output_field=IntegerField(),
-            )
-        ).order_by("priority_rank", "created_at", "id")
+        queryset = Patient.objects.order_by("-created_at", "-id")
 
         search = self.request.query_params.get("search", "").strip()
         camp = self.request.query_params.get("camp", "").strip()
@@ -525,6 +544,17 @@ class AdminReportExportView(APIView):
             f"<tr><td>{item['period']}</td><td>{item['total_quantity']}</td></tr>"
             for item in report_data["drug_usage_trends"]
         )
+        referral_rows = "".join(
+            "<tr>"
+            f"<td>{item['patient_name']}</td>"
+            f"<td>{item['reg_no']}</td>"
+            f"<td>{item['camp']}</td>"
+            f"<td>{item['diagnosis']}</td>"
+            f"<td>{item['referral_details']}</td>"
+            f"<td>{'<br/>'.join(item['prescriptions']) if item['prescriptions'] else 'No prescriptions'}</td>"
+            "</tr>"
+            for item in report_data["referral_case_details"]
+        )
 
         html = f"""
         <html>
@@ -587,6 +617,12 @@ class AdminReportExportView(APIView):
                 <tr><th>Period</th><th>Total Quantity Dispensed</th></tr>
                 {trend_rows}
             </table>
+
+            <h2>Referral Case Details</h2>
+            <table>
+                <tr><th>Patient Name</th><th>Reg No</th><th>Camp</th><th>Diagnosis</th><th>Referral Details</th><th>Prescriptions</th></tr>
+                {referral_rows}
+            </table>
         </body>
         </html>
         """
@@ -644,7 +680,7 @@ class AdminStageTimingView(APIView):
 class DrugInventoryListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         refresh_inventory_totals()
-        queryset = DrugInventory.objects.all().order_by("drug_name", "amount")
+        queryset = DrugInventory.objects.all().order_by("category", "drug_name", "amount")
         search = self.request.query_params.get("search", "").strip()
         low_stock = self.request.query_params.get("low_stock", "").strip().lower()
 

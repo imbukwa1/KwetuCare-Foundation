@@ -119,8 +119,8 @@ class AuditLogAdmin(admin.ModelAdmin):
 
 @admin.register(DrugInventory)
 class DrugInventoryAdmin(admin.ModelAdmin):
-    list_display = ("camp", "drug_name", "amount", "stock_quantity", "reorder_level", "updated_at")
-    search_fields = ("camp", "drug_name", "amount")
+    list_display = ("category", "drug_name", "amount", "stock_quantity", "reorder_level", "updated_at")
+    search_fields = ("category", "drug_name", "amount")
 
 
 @admin.register(DrugBatch)

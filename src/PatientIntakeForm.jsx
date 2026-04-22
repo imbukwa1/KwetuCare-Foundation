@@ -3,12 +3,25 @@ import "./PatientIntakeForm.css";
 import { createPatient } from "./api";
 import logo from "./kcf logo.jpeg";
 
-const REQUIRED_FIELDS = ["name", "age", "gender", "phone", "camp", "location", "nextOfKin"];
+const REQUIRED_FIELDS = ["name", "dateOfBirth", "gender", "phone", "camp", "location", "nextOfKin"];
+
+function calculateAgeFromDob(dateOfBirth) {
+  if (!dateOfBirth) return "";
+  const dob = new Date(dateOfBirth);
+  if (Number.isNaN(dob.getTime())) return "";
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDiff = today.getMonth() - dob.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+    age -= 1;
+  }
+  return age < 0 ? "" : String(age);
+}
 
 export default function PatientIntakeForm({ currentUser, onLogout }) {
   const [form, setForm] = useState({
     name: "",
-    age: "",
+    dateOfBirth: "",
     gender: "",
     phone: "",
     camp: "",
@@ -57,7 +70,7 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
 
     createPatient({
       name: form.name,
-      age: Number(form.age),
+      age: Number(calculateAgeFromDob(form.dateOfBirth)),
       gender: form.gender,
       phone: form.phone,
       camp: form.camp,
@@ -74,7 +87,7 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
         setMessage(`Registration complete for ${patient.name}. Reg No: ${patient.reg_no}. Queued for triage.`);
         setForm({
           name: "",
-          age: "",
+          dateOfBirth: "",
           gender: "",
           phone: "",
           camp: "",
@@ -121,8 +134,15 @@ export default function PatientIntakeForm({ currentUser, onLogout }) {
               <input value={form.name} onChange={handleChange("name")} type="text" placeholder="Full name" required />
             </label>
             <label>
-              Age <span>*</span>
-              <input value={form.age} onChange={handleChange("age")} type="number" min="0" placeholder="Age" required />
+              Date of Birth <span>*</span>
+              <input value={form.dateOfBirth} onChange={handleChange("dateOfBirth")} type="date" required />
+            </label>
+          </div>
+
+          <div className="kcf-row">
+            <label>
+              Age
+              <input value={calculateAgeFromDob(form.dateOfBirth)} type="number" readOnly placeholder="Auto-calculated from DOB" />
             </label>
           </div>
 

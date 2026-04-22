@@ -12,8 +12,8 @@ from urllib import error, request
 PROJECT_ROOT = Path(r"C:\Users\imbuk\kwetucare-foundation")
 BACKEND_ROOT = PROJECT_ROOT / "backend"
 FRONTEND_ROOT = PROJECT_ROOT
-API_BASE_URL = os.getenv("KCF_API_BASE_URL", "http://127.0.0.1:8000/api")
-PING_URL = os.getenv("KCF_PING_URL", "http://127.0.0.1:8000/ping/")
+API_BASE_URL = os.getenv("KCF_API_BASE_URL", "http://127.0.0.1:8010/api")
+PING_URL = os.getenv("KCF_PING_URL", "http://127.0.0.1:8010/ping/")
 DEFAULT_PASSWORD = os.getenv("KCF_TEST_PASSWORD", "Test12345!")
 LOAD_USERS = int(os.getenv("KCF_LOAD_USERS", "20"))
 

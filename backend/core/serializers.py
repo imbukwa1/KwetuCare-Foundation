@@ -251,25 +251,35 @@ def get_patient_consultation(patient):
 
 def get_available_inventory_queryset(*, camp=None):
     refresh_inventory_totals()
-    return DrugInventory.objects.filter(stock_quantity__gt=0).order_by("drug_name", "amount")
+    return DrugInventory.objects.filter(stock_quantity__gt=0).order_by("category", "drug_name", "amount")
 
 
 def normalize_prescriptions_against_inventory(prescriptions, *, camp):
     if not prescriptions:
-        raise serializers.ValidationError("At least one prescription is required.")
+        return []
+
+    def canonicalize(text):
+        return re.sub(r"[^a-z0-9]+", "", str(text).strip().lower())
+
+    def numeric_prefix(text):
+        match = re.match(r"^\s*(\d+(?:\.\d+)?)", str(text).strip())
+        return match.group(1) if match else None
 
     available_inventory = list(get_available_inventory_queryset())
     inventory_by_key = {
-        (item.drug_name.strip().lower(), item.amount.strip().lower()): item
+        (canonicalize(item.drug_name), canonicalize(item.amount)): item
         for item in available_inventory
     }
+    inventory_by_drug = {}
+    for item in available_inventory:
+        inventory_by_drug.setdefault(canonicalize(item.drug_name), []).append(item)
 
     normalized_items = []
     seen_drugs = set()
     for item in prescriptions:
         drug_name = item["drug_name"].strip()
         dosage = item["dosage"].strip()
-        key = (drug_name.lower(), dosage.lower())
+        key = (canonicalize(drug_name), canonicalize(dosage))
 
         if key in seen_drugs:
             raise serializers.ValidationError(
@@ -277,6 +287,17 @@ def normalize_prescriptions_against_inventory(prescriptions, *, camp):
             )
 
         inventory = inventory_by_key.get(key)
+        if inventory is None:
+            same_drug_options = inventory_by_drug.get(canonicalize(drug_name), [])
+            requested_numeric = numeric_prefix(dosage)
+            if requested_numeric:
+                numeric_matches = [
+                    option
+                    for option in same_drug_options
+                    if numeric_prefix(option.amount) == requested_numeric
+                ]
+                if len(numeric_matches) == 1:
+                    inventory = numeric_matches[0]
         if inventory is None:
             raise serializers.ValidationError(
                 f"{drug_name} {dosage} is not available in stock."
@@ -507,9 +528,14 @@ class TriageSerializer(serializers.ModelSerializer):
         write_only=True,
     )
     requires_blood_sugar_check = serializers.BooleanField(write_only=True, default=False)
-    height = serializers.DecimalField(max_digits=4, decimal_places=2, required=True)
-    respiratory_rate = serializers.IntegerField(required=True)
-    spo2 = serializers.IntegerField(required=True)
+    blood_pressure = serializers.CharField(required=False, allow_blank=True)
+    temperature = serializers.DecimalField(max_digits=4, decimal_places=1, required=False, allow_null=True)
+    weight = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
+    heart_rate = serializers.IntegerField(required=False, allow_null=True)
+    height = serializers.DecimalField(max_digits=4, decimal_places=2, required=False, allow_null=True)
+    respiratory_rate = serializers.IntegerField(required=False, allow_null=True)
+    spo2 = serializers.IntegerField(required=False, allow_null=True)
+    nurse_notes = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = Triage
@@ -533,39 +559,53 @@ class TriageSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "patient", "bmi", "created_at")
 
     def validate_temperature(self, value):
+        if value is None:
+            return value
         if value < 30 or value > 45:
             raise serializers.ValidationError("Temperature must be between 30.0 and 45.0 Celsius.")
         return value
 
     def validate_blood_pressure(self, value):
         normalized_value = value.strip()
+        if not normalized_value:
+            return ""
         if not re.fullmatch(r"\d{2,3}/\d{2,3}", normalized_value):
             raise serializers.ValidationError("Blood pressure must be in the format systolic/diastolic, e.g. 120/80.")
         return normalized_value
 
     def validate_weight(self, value):
+        if value is None:
+            return value
         if value <= 0 or value > 500:
             raise serializers.ValidationError("Weight must be greater than 0 and not exceed 500 kg.")
         return value
 
     def validate_height(self, value):
+        if value is None:
+            return value
         if value <= 0:
             raise serializers.ValidationError("Height must be greater than 0.")
-        if value < 0.5 or value > 2.5:
-            raise serializers.ValidationError("Height must be between 0.50m and 2.50m.")
+        if value > 2.5:
+            raise serializers.ValidationError("Height must not exceed 2.50m.")
         return value
 
     def validate_heart_rate(self, value):
+        if value is None:
+            return value
         if value < 30 or value > 220:
             raise serializers.ValidationError("Heart rate must be between 30 and 220 bpm.")
         return value
 
     def validate_respiratory_rate(self, value):
+        if value is None:
+            return value
         if value < 12 or value > 25:
             raise serializers.ValidationError("Respiratory rate must be between 12 and 25 breaths per minute.")
         return value
 
     def validate_spo2(self, value):
+        if value is None:
+            return value
         if value < 70 or value > 100:
             raise serializers.ValidationError("SpO2 must be between 70 and 100.")
         return value
@@ -611,6 +651,11 @@ class TriageSerializer(serializers.ModelSerializer):
         validated_data.pop("patient_id")
         assigned_doctor_type = validated_data.pop("assigned_doctor_type", None)
         requires_blood_sugar_check = validated_data.pop("requires_blood_sugar_check", False)
+        validated_data.setdefault("blood_pressure", "")
+        validated_data.setdefault("temperature", 0)
+        validated_data.setdefault("weight", 0)
+        validated_data.setdefault("heart_rate", 0)
+        validated_data.setdefault("nurse_notes", "")
 
         with transaction.atomic():
             patient = Patient.objects.select_for_update().get(id=self.context["patient"].id)
@@ -688,7 +733,7 @@ class PrescriptionCreateSerializer(serializers.ModelSerializer):
 class ConsultationCreateSerializer(serializers.ModelSerializer):
     patient_id = serializers.IntegerField(write_only=True)
     patient = serializers.SerializerMethodField(read_only=True)
-    prescriptions = PrescriptionCreateSerializer(many=True)
+    prescriptions = PrescriptionCreateSerializer(many=True, required=False)
     
     # Health Information
     healthInformation = serializers.JSONField(write_only=True, required=False)
@@ -795,7 +840,7 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        prescriptions_data = validated_data.pop("prescriptions")
+        prescriptions_data = validated_data.pop("prescriptions", [])
         validated_data.pop("patient_id")
         ensure_consultation_referral_column()
         
@@ -902,7 +947,16 @@ class ConsultationCreateSerializer(serializers.ModelSerializer):
 
 class PediatricConsultationCreateSerializer(serializers.ModelSerializer):
     patient_id = serializers.IntegerField(write_only=True)
-    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True)
+    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True, required=False)
+    presenting_complaint = serializers.CharField(required=False, allow_blank=True)
+    history_presenting_illness = serializers.CharField(required=False, allow_blank=True)
+    past_medical_history = serializers.CharField(required=False, allow_blank=True)
+    prenatal_antenatal_history = serializers.CharField(required=False, allow_blank=True)
+    birth_history = serializers.CharField(required=False, allow_blank=True)
+    nutritional_history = serializers.CharField(required=False, allow_blank=True)
+    growth_development_history = serializers.CharField(required=False, allow_blank=True)
+    family_social_history = serializers.CharField(required=False, allow_blank=True)
+    diagnosis = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = PediatricConsultation
@@ -953,7 +1007,7 @@ class PediatricConsultationCreateSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        prescriptions_data = validated_data.pop("prescriptions")
+        prescriptions_data = validated_data.pop("prescriptions", [])
         validated_data.pop("patient_id")
         ensure_consultation_referral_column()
 
@@ -1016,7 +1070,17 @@ class PediatricConsultationCreateSerializer(serializers.ModelSerializer):
 
 class WomensHealthConsultationBaseSerializer(serializers.ModelSerializer):
     patient_id = serializers.IntegerField(write_only=True)
-    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True)
+    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True, required=False)
+    presenting_complaints = serializers.CharField(required=False, allow_blank=True)
+    history_presenting_complaints = serializers.CharField(required=False, allow_blank=True)
+    antenatal_history = serializers.CharField(required=False, allow_blank=True)
+    obstetric_history = serializers.CharField(required=False, allow_blank=True)
+    gynecological_history = serializers.CharField(required=False, allow_blank=True)
+    sexual_reproductive_history = serializers.CharField(required=False, allow_blank=True)
+    past_medical_surgical_family_history = serializers.CharField(required=False, allow_blank=True)
+    examination_review_systems = serializers.CharField(required=False, allow_blank=True)
+    diagnosis = serializers.CharField(required=False, allow_blank=True)
+    treatment_plan = serializers.CharField(required=False, allow_blank=True)
 
     assigned_doctor_type = None
     consultation_model = None
@@ -1069,7 +1133,7 @@ class WomensHealthConsultationBaseSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        prescriptions_data = validated_data.pop("prescriptions")
+        prescriptions_data = validated_data.pop("prescriptions", [])
         validated_data.pop("patient_id")
         ensure_consultation_referral_column()
 
@@ -1174,7 +1238,24 @@ class ObstetricConsultationCreateSerializer(WomensHealthConsultationBaseSerializ
 
 class NutritionConsultationCreateSerializer(serializers.ModelSerializer):
     patient_id = serializers.IntegerField(write_only=True)
-    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True)
+    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True, required=False)
+    presenting_complaint = serializers.CharField(required=False, allow_blank=True)
+    dietary_history = serializers.CharField(required=False, allow_blank=True)
+    nutritional_assessment = serializers.CharField(required=False, allow_blank=True)
+    medical_health_conditions = serializers.CharField(required=False, allow_blank=True)
+    child_feeding_history = serializers.CharField(required=False, allow_blank=True)
+    lifestyle_assessment = serializers.CharField(required=False, allow_blank=True)
+    nutrition_diagnosis = serializers.ChoiceField(
+        choices=NutritionConsultation.NutritionDiagnosis.choices,
+        required=False,
+        allow_blank=True,
+    )
+    risk_level = serializers.ChoiceField(
+        choices=NutritionConsultation.RiskLevel.choices,
+        required=False,
+        allow_blank=True,
+    )
+    nutrition_plan = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = NutritionConsultation
@@ -1225,7 +1306,7 @@ class NutritionConsultationCreateSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        prescriptions_data = validated_data.pop("prescriptions")
+        prescriptions_data = validated_data.pop("prescriptions", [])
         validated_data.pop("patient_id")
         ensure_consultation_referral_column()
 
@@ -1297,7 +1378,15 @@ class NutritionConsultationCreateSerializer(serializers.ModelSerializer):
 
 class OpticianConsultationCreateSerializer(serializers.ModelSerializer):
     patient_id = serializers.IntegerField(write_only=True)
-    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True)
+    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True, required=False)
+    presenting_complaint = serializers.CharField(required=False, allow_blank=True)
+    ocular_history = serializers.CharField(required=False, allow_blank=True)
+    visual_symptoms_functional_impact = serializers.CharField(required=False, allow_blank=True)
+    past_ocular_medical_history = serializers.CharField(required=False, allow_blank=True)
+    medication_allergy_eye_drop_history = serializers.CharField(required=False, allow_blank=True)
+    examination_vision_assessment = serializers.CharField(required=False, allow_blank=True)
+    diagnosis = serializers.CharField(required=False, allow_blank=True)
+    treatment_plan = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = OpticianConsultation
@@ -1347,7 +1436,7 @@ class OpticianConsultationCreateSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        prescriptions_data = validated_data.pop("prescriptions")
+        prescriptions_data = validated_data.pop("prescriptions", [])
         validated_data.pop("patient_id")
         ensure_consultation_referral_column()
 
@@ -1414,7 +1503,15 @@ class OpticianConsultationCreateSerializer(serializers.ModelSerializer):
 
 class DentalConsultationCreateSerializer(serializers.ModelSerializer):
     patient_id = serializers.IntegerField(write_only=True)
-    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True)
+    prescriptions = PrescriptionCreateSerializer(many=True, write_only=True, required=False)
+    presenting_complaint = serializers.CharField(required=False, allow_blank=True)
+    history_presenting_illness = serializers.CharField(required=False, allow_blank=True)
+    oral_examination = serializers.CharField(required=False, allow_blank=True)
+    oral_hygiene_practices = serializers.CharField(required=False, allow_blank=True)
+    past_dental_history = serializers.CharField(required=False, allow_blank=True)
+    medical_history = serializers.CharField(required=False, allow_blank=True)
+    diagnosis = serializers.CharField(required=False, allow_blank=True)
+    treatment_plan = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = DentalConsultation
@@ -1464,7 +1561,7 @@ class DentalConsultationCreateSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        prescriptions_data = validated_data.pop("prescriptions")
+        prescriptions_data = validated_data.pop("prescriptions", [])
         validated_data.pop("patient_id")
         ensure_consultation_referral_column()
 
@@ -1698,12 +1795,15 @@ class DrugInventorySerializer(serializers.ModelSerializer):
     expired_batch_count = serializers.SerializerMethodField()
     near_expiry_batch_count = serializers.SerializerMethodField()
     batches = serializers.SerializerMethodField()
+    category_label = serializers.CharField(source="get_category_display", read_only=True)
 
     class Meta:
         model = DrugInventory
         fields = (
             "id",
             "camp",
+            "category",
+            "category_label",
             "drug_name",
             "amount",
             "stock_quantity",
@@ -1792,6 +1892,7 @@ class DrugBatchSerializer(serializers.ModelSerializer):
 class DrugInventoryCreateSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     camp = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    category = serializers.ChoiceField(choices=DrugInventory.Category.choices)
     drug_name = serializers.CharField()
     amount = serializers.CharField()
     stock_quantity = serializers.IntegerField(min_value=1)
@@ -1818,10 +1919,14 @@ class DrugInventoryCreateSerializer(serializers.Serializer):
             camp=validated_data["camp"],
             drug_name=validated_data["drug_name"],
             amount=validated_data["amount"],
-            defaults={"reorder_level": validated_data["reorder_level"]},
+            defaults={
+                "reorder_level": validated_data["reorder_level"],
+                "category": validated_data["category"],
+            },
         )
+        inventory.category = validated_data["category"]
         inventory.reorder_level = validated_data["reorder_level"]
-        inventory.save(update_fields=["reorder_level", "updated_at"])
+        inventory.save(update_fields=["category", "reorder_level", "updated_at"])
         DrugBatch.objects.create(
             inventory=inventory,
             quantity_received=stock_quantity,
@@ -1837,6 +1942,8 @@ class DrugInventoryCreateSerializer(serializers.Serializer):
         return {
             "id": instance.id,
             "camp": instance.camp,
+            "category": instance.category,
+            "category_label": instance.get_category_display(),
             "drug_name": instance.drug_name,
             "amount": instance.amount,
             "stock_quantity": instance.stock_quantity,
@@ -1870,10 +1977,11 @@ class InventoryRestockSerializer(serializers.Serializer):
 
 class AvailableDrugSerializer(serializers.ModelSerializer):
     label = serializers.SerializerMethodField()
+    category_label = serializers.CharField(source="get_category_display", read_only=True)
 
     class Meta:
         model = DrugInventory
-        fields = ("id", "drug_name", "amount", "stock_quantity", "label")
+        fields = ("id", "category", "category_label", "drug_name", "amount", "stock_quantity", "label")
 
     def get_label(self, obj):
         unit_label = "unit" if obj.stock_quantity == 1 else "units"
@@ -2162,12 +2270,30 @@ class OutcomeSummarySerializer(serializers.Serializer):
     pending = serializers.IntegerField()
 
 
+class ReferralCaseSerializer(serializers.Serializer):
+    patient_name = serializers.CharField()
+    reg_no = serializers.CharField()
+    camp = serializers.CharField()
+    diagnosis = serializers.CharField()
+    referral_details = serializers.CharField()
+    prescriptions = serializers.ListField(child=serializers.CharField())
+
+
 class StageWaitingCountsSerializer(serializers.Serializer):
     triage = serializers.IntegerField()
     blood_sugar = serializers.IntegerField()
     doctor = serializers.IntegerField()
     pharmacy = serializers.IntegerField()
     complete = serializers.IntegerField()
+
+
+class SpecialistWaitingCountsSerializer(serializers.Serializer):
+    pediatrician = serializers.IntegerField()
+    gynecologist = serializers.IntegerField()
+    obstetrician = serializers.IntegerField()
+    nutritionist = serializers.IntegerField()
+    dental = serializers.IntegerField()
+    optician = serializers.IntegerField()
 
 
 class AdminReportSerializer(serializers.Serializer):
@@ -2181,9 +2307,11 @@ class AdminReportSerializer(serializers.Serializer):
     most_common_conditions = CommonConditionSerializer(many=True)
     drug_usage_trends = DrugUsageTrendSerializer(many=True)
     stage_waiting_counts = StageWaitingCountsSerializer()
+    specialist_waiting_counts = SpecialistWaitingCountsSerializer()
     completed_patients = serializers.IntegerField()
     referral_cases = serializers.IntegerField()
     outcome_summary = OutcomeSummarySerializer()
+    referral_case_details = ReferralCaseSerializer(many=True)
 
 
 class StageTimingAnalyticsSerializer(serializers.Serializer):
