@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/frontend/node_modules
 /.pnp
 .pnp.js
 
@@ -10,6 +11,14 @@
 
 # production
 /build
+/dist
+/frontend/build
+/frontend/src/.kcf_dist
+/frontend/src/.kcf_test_data
+/backend/staticfiles
+
+# local database
+/backend/db.sqlite3
 
 # misc
 .DS_Store

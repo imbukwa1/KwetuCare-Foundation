@@ -20,6 +20,12 @@ const REPORT_PERIOD_OPTIONS = [
   { value: "1y", label: "Last 1 Year" },
 ];
 
+function buildDefaultExpiryDate() {
+  const nextYear = new Date();
+  nextYear.setFullYear(nextYear.getFullYear() + 1);
+  return nextYear.toISOString().split("T")[0];
+}
+
 function Header({ currentUser, onLogout, onDownloadReport }) {
   return (
     <header className="admin-header">
@@ -388,7 +394,56 @@ function PatientSearchPanel({ patients, search, setSearch, visibleCount, onSeeMo
   );
 }
 
-function InventoryPanel({ inventory, form, setForm, restockAmounts, setRestockAmounts, onCreate, onRestock }) {
+function RestockModal({ item, restockAmounts, setRestockAmounts, onClose, onConfirm }) {
+  if (!item) return null;
+
+  return (
+    <div className="admin-modal-overlay" onClick={onClose}>
+      <div className="admin-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="admin-modal-header">
+          <h3>Restock {item.drug_name}</h3>
+          <button className="close-btn" onClick={onClose}>x</button>
+        </div>
+        <div className="admin-modal-body">
+          <div className="admin-modal-section">
+            <div className="admin-modal-grid">
+              <label><span>Category</span><input value={item.category_label || item.category} readOnly /></label>
+              <label><span>Amount</span><input value={item.amount} readOnly /></label>
+              <label><span>Available Stock</span><input value={item.stock_quantity} readOnly /></label>
+              <label><span>Reorder Level</span><input value={item.reorder_level} readOnly /></label>
+            </div>
+          </div>
+          <div className="admin-modal-section">
+            <p className="admin-modal-note">
+              Add the number of units to stock. Batch and expiry details are managed internally to keep this view simple.
+            </p>
+            <label>
+              Quantity to Add
+              <input
+                className="admin-input"
+                type="number"
+                min="1"
+                value={restockAmounts[item.id]?.quantity || ""}
+                onChange={(event) =>
+                  setRestockAmounts((prev) => ({
+                    ...prev,
+                    [item.id]: { ...(prev[item.id] || {}), quantity: event.target.value },
+                  }))
+                }
+              />
+            </label>
+          </div>
+          <div className="admin-modal-actions">
+            <button className="btn-muted" onClick={onClose}>Cancel</button>
+            <button className="btn-maroon" onClick={() => onConfirm(item.id)}>Restock</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InventoryPanel({ inventory, form, setForm, onCreate, onOpenRestock }) {
   const categories = [
     ["analgesics", "Analgesics (Painkillers)"],
     ["antibiotics", "Antibiotics"],
@@ -418,8 +473,7 @@ function InventoryPanel({ inventory, form, setForm, restockAmounts, setRestockAm
         <input className="admin-input" placeholder="Unit/Dosage e.g. 500mg" value={form.amount} onChange={(event) => setForm((prev) => ({ ...prev, amount: event.target.value }))} />
         <input className="admin-input" placeholder="Batch quantity" type="number" min="1" value={form.stock_quantity} onChange={(event) => setForm((prev) => ({ ...prev, stock_quantity: event.target.value }))} />
         <input className="admin-input" placeholder="Reorder level" type="number" min="0" value={form.reorder_level} onChange={(event) => setForm((prev) => ({ ...prev, reorder_level: event.target.value }))} />
-        <input className="admin-input" type="date" value={form.expiry_date} onChange={(event) => setForm((prev) => ({ ...prev, expiry_date: event.target.value }))} />
-        <button className="btn-maroon" onClick={onCreate}>Add Batch</button>
+        <button className="btn-maroon" onClick={onCreate}>Add Stock</button>
       </div>
       <table className="data-table">
         <thead>
@@ -427,11 +481,9 @@ function InventoryPanel({ inventory, form, setForm, restockAmounts, setRestockAm
             <th>Drug</th>
             <th>Category</th>
             <th>Amount</th>
-            <th>Available Stock</th>
+            <th>Stock Info</th>
             <th>Reorder Level</th>
-            <th>Expiry Alerts</th>
-            <th>Batches</th>
-            <th>Restock</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody>
@@ -440,51 +492,27 @@ function InventoryPanel({ inventory, form, setForm, restockAmounts, setRestockAm
               <td>{item.drug_name}</td>
               <td>{item.category_label || item.category}</td>
               <td>{item.amount}</td>
-              <td>{item.stock_quantity}</td>
+              <td>
+                <div className="inventory-stock-info">
+                  <span className="inventory-stock-primary">{item.stock_quantity} units</span>
+                  <div className="inventory-stock-badges">
+                    {item.is_low_stock ? (
+                      <span className="inventory-badge inventory-badge-danger">Low stock</span>
+                    ) : (
+                      <span className="inventory-badge">Healthy</span>
+                    )}
+                    {item.expired_batch_count > 0 && (
+                      <span className="inventory-badge inventory-badge-muted">Expired {item.expired_batch_count}</span>
+                    )}
+                    {item.near_expiry_batch_count > 0 && (
+                      <span className="inventory-badge inventory-badge-warning">Near expiry {item.near_expiry_batch_count}</span>
+                    )}
+                  </div>
+                </div>
+              </td>
               <td>{item.reorder_level}</td>
               <td>
-                {item.expired_batch_count > 0 && <div>Expired: {item.expired_batch_count}</div>}
-                {item.near_expiry_batch_count > 0 && <div>Near expiry: {item.near_expiry_batch_count}</div>}
-                {item.expired_batch_count === 0 && item.near_expiry_batch_count === 0 && "Clear"}
-                {item.is_low_stock && <div>Low stock</div>}
-              </td>
-              <td>
-                {item.batches?.length ? (
-                  item.batches.map((batch) => (
-                    <div key={batch.id}>
-                      {batch.quantity_remaining}/{batch.quantity_received} exp {batch.expiry_date} ({batch.status})
-                    </div>
-                  ))
-                ) : (
-                  "No batches"
-                )}
-              </td>
-              <td className="action-row">
-                <input
-                  className="admin-input"
-                  type="number"
-                  min="1"
-                  placeholder="Qty"
-                  value={restockAmounts[item.id]?.quantity || ""}
-                  onChange={(event) =>
-                    setRestockAmounts((prev) => ({
-                      ...prev,
-                      [item.id]: { ...(prev[item.id] || {}), quantity: event.target.value },
-                    }))
-                  }
-                />
-                <input
-                  className="admin-input"
-                  type="date"
-                  value={restockAmounts[item.id]?.expiry_date || ""}
-                  onChange={(event) =>
-                    setRestockAmounts((prev) => ({
-                      ...prev,
-                      [item.id]: { ...(prev[item.id] || {}), expiry_date: event.target.value },
-                    }))
-                  }
-                />
-                <button className="btn-muted" onClick={() => onRestock(item.id)}>Restock</button>
+                <button className="btn-muted" onClick={() => onOpenRestock(item)}>Restock</button>
               </td>
             </tr>
           ))}
@@ -520,9 +548,9 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
     amount: "",
     stock_quantity: "",
     reorder_level: "",
-    expiry_date: "",
   });
   const [restockAmounts, setRestockAmounts] = useState({});
+  const [restockTarget, setRestockTarget] = useState(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -651,9 +679,9 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
         amount: inventoryForm.amount,
         stock_quantity: Number(inventoryForm.stock_quantity),
         reorder_level: Number(inventoryForm.reorder_level),
-        expiry_date: inventoryForm.expiry_date,
+        expiry_date: buildDefaultExpiryDate(),
       });
-      setInventoryForm({ category: inventoryForm.category, drug_name: "", amount: "", stock_quantity: "", reorder_level: "", expiry_date: "" });
+      setInventoryForm({ category: inventoryForm.category, drug_name: "", amount: "", stock_quantity: "", reorder_level: "" });
       setStatusMessage("Inventory item created.");
       await refresh({ source: "after-create-inventory" });
     } catch (actionError) {
@@ -663,14 +691,14 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
 
   const handleRestock = useCallback(async (id) => {
     const quantity = Number(restockAmounts[id]?.quantity);
-    const expiryDate = restockAmounts[id]?.expiry_date;
-    if (!quantity || quantity < 1 || !expiryDate) {
-      setError("Enter a valid restock quantity and expiry date.");
+    if (!quantity || quantity < 1) {
+      setError("Enter a valid restock quantity.");
       return;
     }
     try {
-      await restockInventoryItem(id, { quantity, expiry_date: expiryDate });
-      setRestockAmounts((prev) => ({ ...prev, [id]: { quantity: "", expiry_date: "" } }));
+      await restockInventoryItem(id, { quantity, expiry_date: buildDefaultExpiryDate() });
+      setRestockAmounts((prev) => ({ ...prev, [id]: { quantity: "" } }));
+      setRestockTarget(null);
       setStatusMessage("Inventory restocked.");
       await refresh({ source: "after-restock" });
     } catch (actionError) {
@@ -726,10 +754,15 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
           inventory={inventory}
           form={inventoryForm}
           setForm={setInventoryForm}
+          onCreate={handleCreateInventory}
+          onOpenRestock={setRestockTarget}
+        />
+        <RestockModal
+          item={restockTarget}
           restockAmounts={restockAmounts}
           setRestockAmounts={setRestockAmounts}
-          onCreate={handleCreateInventory}
-          onRestock={handleRestock}
+          onClose={() => setRestockTarget(null)}
+          onConfirm={handleRestock}
         />
       </div>
     </div>

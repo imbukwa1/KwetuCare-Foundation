@@ -201,6 +201,7 @@ body {
   width: 100%;
   border-collapse: collapse;
   margin-top: 0.15rem;
+  table-layout: fixed;
 }
 
 .data-table th,
@@ -260,6 +261,124 @@ body {
   min-width: 180px;
 }
 
+.inventory-stock-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.inventory-stock-primary {
+  font-weight: 700;
+  color: var(--maroon);
+}
+
+.inventory-stock-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.inventory-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  background: #efe5d9;
+  color: #6a4a3f;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.inventory-badge-danger {
+  background: #fbe0e4;
+  color: #8b1e2f;
+}
+
+.inventory-badge-warning {
+  background: #fff0d6;
+  color: #8b5a12;
+}
+
+.inventory-badge-muted {
+  background: #eee7de;
+  color: #5c5147;
+}
+
+.admin-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 18, 12, 0.48);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 1000;
+}
+
+.admin-modal {
+  width: min(100%, 640px);
+  background: #fff8f0;
+  border: 1px solid var(--border-brown);
+  border-radius: 18px;
+  box-shadow: 0 18px 40px rgba(48, 27, 18, 0.24);
+  overflow: hidden;
+}
+
+.admin-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid var(--lightbrown);
+}
+
+.admin-modal-header h3 {
+  margin: 0;
+  color: var(--maroon);
+}
+
+.admin-modal-body {
+  padding: 1rem 1.1rem 1.15rem;
+}
+
+.admin-modal-section {
+  margin-bottom: 1rem;
+}
+
+.admin-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.admin-modal-grid label,
+.admin-modal-section label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: #6a4a3f;
+  font-weight: 600;
+}
+
+.admin-modal-grid input,
+.admin-modal-section input {
+  width: 100%;
+}
+
+.admin-modal-note {
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  background: #f8ece4;
+  color: #6a4a3f;
+}
+
+.admin-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
 @media (max-width: 950px) {
   .summary-cards {
     grid-template-columns: 1fr;
@@ -272,5 +391,9 @@ body {
   .data-table th,
   .data-table td {
     font-size: 0.9rem;
+  }
+
+  .admin-modal-grid {
+    grid-template-columns: 1fr;
   }
 }

@@ -2,14 +2,26 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+import dj_database_url
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def split_env(name, default=''):
+    return [value.strip() for value in os.getenv(name, default).split(',') if value.strip()]
 
 SECRET_KEY = os.getenv(
     'DJANGO_SECRET_KEY',
     'kwetu-care-local-dev-secret-key-please-change-in-production-2026',
 )
-DEBUG = True
-ALLOWED_HOSTS = ['*']
+DEBUG = os.getenv('DJANGO_DEBUG', 'true').lower() == 'true'
+
+ALLOWED_HOSTS = split_env('DJANGO_ALLOWED_HOSTS')
+railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
+if railway_domain:
+    ALLOWED_HOSTS.append(railway_domain)
+if DEBUG and not ALLOWED_HOSTS:
+    ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -25,8 +37,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.common.CommonMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.middleware.common.CommonMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -65,6 +78,12 @@ DATABASES = {
     }
 }
 
+if os.getenv('DATABASE_URL'):
+    DATABASES['default'] = dj_database_url.config(
+        conn_max_age=600,
+        ssl_require=os.getenv('DATABASE_SSL_REQUIRE', 'false').lower() == 'true',
+    )
+
 AUTH_PASSWORD_VALIDATORS = []
 AUTH_USER_MODEL = 'core.User'
 
@@ -74,6 +93,12 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STORAGES = {
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
@@ -93,8 +118,13 @@ SIMPLE_JWT = {
 # Local testing helper: when True, signup auto-approves users and approval checks are bypassed.
 BYPASS_USER_APPROVAL = os.getenv('BYPASS_USER_APPROVAL', 'true').lower() == 'true'
 
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = split_env('CORS_ALLOWED_ORIGINS')
+CORS_ALLOW_ALL_ORIGINS = (
+    os.getenv('CORS_ALLOW_ALL_ORIGINS', 'true' if DEBUG and not CORS_ALLOWED_ORIGINS else 'false').lower()
+    == 'true'
+)
 CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = split_env('CSRF_TRUSTED_ORIGINS')
 
 # For production, replace with allowed origin list
 # CORS_ALLOWED_ORIGINS = [

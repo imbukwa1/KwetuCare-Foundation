@@ -9,7 +9,7 @@ from urllib import error, request
 TEST_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = TEST_DIR.parent.parent
 BACKEND_DIR = PROJECT_ROOT / "backend"
-TEST_DB_PATH = PROJECT_ROOT / "src" / ".kcf_test_data" / "test_db.sqlite3"
+TEST_DB_PATH = PROJECT_ROOT / "frontend" / "src" / ".kcf_test_data" / "test_db.sqlite3"
 TEST_HOST = os.getenv("KCF_TEST_HOST", "127.0.0.1")
 TEST_PORT = int(os.getenv("KCF_TEST_PORT", "8010"))
 TEST_API_BASE_URL = f"http://{TEST_HOST}:{TEST_PORT}/api"
@@ -26,6 +26,8 @@ TEST_FILES = [
     "09_blood_sugar_department_test.py",
     "10_specialist_workflows_test.py",
     "11_frontend_backend_smoke_test.py",
+    "12_inventory_categories_and_visibility_test.py",
+    "13_referral_reporting_details_test.py",
 ]
 
 
