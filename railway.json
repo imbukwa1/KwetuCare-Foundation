@@ -1,0 +1,9 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "startCommand": "cd backend && python manage.py migrate --noinput && python manage.py collectstatic --noinput && uvicorn backend_config.asgi:application --host 0.0.0.0 --port $PORT"
+  }
+}

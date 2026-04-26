@@ -24,9 +24,11 @@ REACT_APP_WS_URL=wss://kwetucare-foundation-production.up.railway.app/ws/updates
 
 Create a Railway service from this repository with:
 
-- Root Directory: `backend`
-- Config File Path: `/backend/railway.json`
-- Start Command: Railway can use `backend/railway.json`, `backend/nixpacks.toml`, or `backend/Procfile`.
+- Root Directory: leave empty, or set it to `/`
+- Config File Path: `/railway.json`
+- Start Command: Railway can use `railway.json` or `nixpacks.toml`.
+
+There is also a backend-only config in `backend/railway.json` if you prefer setting Railway's root directory to `/backend`.
 
 Add a Railway PostgreSQL database, then set these backend environment variables:
 
