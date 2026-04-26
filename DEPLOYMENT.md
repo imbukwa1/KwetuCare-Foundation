@@ -16,8 +16,8 @@ Create a Vercel project with these settings:
 Set these environment variables after Railway gives you the backend URL:
 
 ```text
-REACT_APP_API_BASE_URL=https://your-railway-app.up.railway.app/api
-REACT_APP_WS_URL=wss://your-railway-app.up.railway.app/ws/updates/
+REACT_APP_API_BASE_URL=https://kwetucare-foundation-production.up.railway.app/api
+REACT_APP_WS_URL=wss://kwetucare-foundation-production.up.railway.app/ws/updates/
 ```
 
 ## Railway
@@ -25,7 +25,8 @@ REACT_APP_WS_URL=wss://your-railway-app.up.railway.app/ws/updates/
 Create a Railway service from this repository with:
 
 - Root Directory: `backend`
-- Start Command: Railway can use `backend/Procfile`.
+- Config File Path: `/backend/railway.json`
+- Start Command: Railway can use `backend/railway.json`, `backend/nixpacks.toml`, or `backend/Procfile`.
 
 Add a Railway PostgreSQL database, then set these backend environment variables:
 
@@ -33,10 +34,17 @@ Add a Railway PostgreSQL database, then set these backend environment variables:
 DATABASE_URL=<Railway PostgreSQL DATABASE_URL>
 DJANGO_DEBUG=false
 DJANGO_SECRET_KEY=<a long random secret>
-DJANGO_ALLOWED_HOSTS=your-railway-app.up.railway.app
-CORS_ALLOWED_ORIGINS=https://your-vercel-app.vercel.app
-CSRF_TRUSTED_ORIGINS=https://your-vercel-app.vercel.app
+DJANGO_ALLOWED_HOSTS=kwetucare-foundation-production.up.railway.app
+CORS_ALLOWED_ORIGINS=https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app
+CSRF_TRUSTED_ORIGINS=https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app
 BYPASS_USER_APPROVAL=false
+```
+
+Current public URLs:
+
+```text
+Backend: https://kwetucare-foundation-production.up.railway.app
+Frontend: https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app
 ```
 
 For local frontend development, run the backend on port `8000`; `frontend/package.json` still proxies API requests to `http://127.0.0.1:8000`.
