@@ -118,13 +118,17 @@ SIMPLE_JWT = {
 # Local testing helper: when True, signup auto-approves users and approval checks are bypassed.
 BYPASS_USER_APPROVAL = os.getenv('BYPASS_USER_APPROVAL', 'true').lower() == 'true'
 
-CORS_ALLOWED_ORIGINS = split_env('CORS_ALLOWED_ORIGINS')
+DEFAULT_FRONTEND_ORIGINS = [
+    'https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app',
+]
+
+CORS_ALLOWED_ORIGINS = split_env('CORS_ALLOWED_ORIGINS') or DEFAULT_FRONTEND_ORIGINS
 CORS_ALLOW_ALL_ORIGINS = (
     os.getenv('CORS_ALLOW_ALL_ORIGINS', 'true' if DEBUG and not CORS_ALLOWED_ORIGINS else 'false').lower()
     == 'true'
 )
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = split_env('CSRF_TRUSTED_ORIGINS')
+CSRF_TRUSTED_ORIGINS = split_env('CSRF_TRUSTED_ORIGINS') or DEFAULT_FRONTEND_ORIGINS
 
 # For production, replace with allowed origin list
 # CORS_ALLOWED_ORIGINS = [
