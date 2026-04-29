@@ -22,13 +22,28 @@ from .models import (
 
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
-    list_display = ("username", "email", "role", "is_approved", "is_staff")
-    list_filter = ("role", "is_approved", "is_staff", "is_superuser")
+    list_display = ("username", "email", "role", "is_email_verified", "is_approved", "is_staff")
+    list_filter = ("role", "is_email_verified", "is_approved", "is_staff", "is_superuser")
     fieldsets = DjangoUserAdmin.fieldsets + (
-        ("Kwetu Care", {"fields": ("role", "is_approved")}),
+        (
+            "Kwetu Care",
+            {
+                "fields": (
+                    "role",
+                    "is_email_verified",
+                    "email_verification_attempts",
+                    "email_verification_expires_at",
+                    "email_verification_locked_at",
+                    "is_approved",
+                    "approved_at",
+                    "rejected_at",
+                    "approval_rejection_reason",
+                )
+            },
+        ),
     )
     add_fieldsets = DjangoUserAdmin.add_fieldsets + (
-        ("Kwetu Care", {"fields": ("role", "is_approved")}),
+        ("Kwetu Care", {"fields": ("role", "is_email_verified", "is_approved")}),
     )
 
 

@@ -35,6 +35,7 @@ from .models import (
     Prescription,
     Triage,
 )
+from .auth_emails import hash_email_verification_code
 from .realtime import publish_audit_event
 
 User = get_user_model()
@@ -124,31 +125,7 @@ def build_patient_reg_no_from_id(patient_id):
 EXPIRY_WARNING_DAYS = 30
 UNIVERSAL_INVENTORY_CAMP = "General"
 PATIENT_REGISTRATION_LOCK = threading.Lock()
-PATIENT_REGISTRATION_LOCK_FILE = os.path.join(settings.BASE_DIR, ".patient_registration.lock")
-
-
-class PatientRegistrationFileLock:
-    def __enter__(self):
-        self.fd = None
-        for attempt in range(200):
-            try:
-                self.fd = os.open(
-                    PATIENT_REGISTRATION_LOCK_FILE,
-                    os.O_CREAT | os.O_EXCL | os.O_RDWR,
-                )
-                return self
-            except FileExistsError:
-                time.sleep(min(0.02 * (attempt + 1), 0.2))
-        raise OperationalError("database is locked")
-
-    def __exit__(self, exc_type, exc, tb):
-        if self.fd is not None:
-            os.close(self.fd)
-        try:
-            if os.path.exists(PATIENT_REGISTRATION_LOCK_FILE):
-                os.remove(PATIENT_REGISTRATION_LOCK_FILE)
-        except OSError:
-            pass
+SIGNUP_LOCK = threading.Lock()
 
 
 def sync_batch_statuses():
@@ -337,25 +314,49 @@ class SignupSerializer(serializers.Serializer):
         full_name = validated_data.pop("full_name")
         password = validated_data.pop("password")
         name_parts = full_name.split(" ", 1)
-        user = User(
-            username=build_unique_username(full_name),
-            first_name=name_parts[0],
-            last_name=name_parts[1] if len(name_parts) > 1 else "",
-            **validated_data,
-        )
-        user.is_approved = settings.BYPASS_USER_APPROVAL
-        user.set_password(password)
-        user.save()
-        return user
+        last_error = None
+
+        with SIGNUP_LOCK:
+            for attempt in range(20):
+                try:
+                    with transaction.atomic():
+                        user = User(
+                            username=build_unique_username(full_name),
+                            first_name=name_parts[0],
+                            last_name=name_parts[1] if len(name_parts) > 1 else "",
+                            **validated_data,
+                        )
+                        user.is_approved = settings.BYPASS_USER_APPROVAL
+                        user.is_email_verified = settings.BYPASS_USER_APPROVAL
+                        user.set_password(password)
+                        user.save()
+                        return user
+                except IntegrityError as exc:
+                    last_error = exc
+                    time.sleep(min(0.02 * (attempt + 1), 0.25))
+                    continue
+                except OperationalError as exc:
+                    last_error = exc
+                    if "locked" not in str(exc).lower():
+                        raise
+                    time.sleep(min(0.05 * (attempt + 1), 0.5))
+                    continue
+
+        if last_error is not None:
+            raise serializers.ValidationError(
+                "Signup is busy right now. Please try again."
+            ) from last_error
+        raise serializers.ValidationError("Unable to create user right now.")
 
 
 class UserSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     is_approved = serializers.SerializerMethodField()
+    is_email_verified = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ("id", "username", "full_name", "email", "role", "is_approved")
+        fields = ("id", "username", "full_name", "email", "role", "is_email_verified", "is_approved")
 
     def get_full_name(self, obj):
         full_name = obj.get_full_name().strip()
@@ -363,6 +364,77 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_is_approved(self, obj):
         return True if settings.BYPASS_USER_APPROVAL else obj.is_approved
+
+    def get_is_email_verified(self, obj):
+        return True if settings.BYPASS_USER_APPROVAL else obj.is_email_verified
+
+
+class VerifyEmailSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField(min_length=6, max_length=6)
+
+    def validate_code(self, value):
+        if not value.isdigit():
+            raise serializers.ValidationError("Verification code must be 6 digits.")
+        return value
+
+    def validate(self, attrs):
+        email = attrs["email"].strip().lower()
+        code = attrs["code"].strip()
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist as exc:
+            raise serializers.ValidationError("No account was found for this email.") from exc
+
+        if user.is_email_verified:
+            attrs["user"] = user
+            return attrs
+
+        if user.email_verification_locked_at:
+            raise serializers.ValidationError("Verification is locked. Request a new code to try again.")
+
+        if not user.email_verification_code_hash or not user.email_verification_expires_at:
+            raise serializers.ValidationError("No active verification code was found. Request a new code.")
+
+        if user.email_verification_expires_at <= timezone.now():
+            raise serializers.ValidationError("Verification code has expired. Request a new code.")
+
+        if user.email_verification_code_hash != hash_email_verification_code(code):
+            user.email_verification_attempts += 1
+            update_fields = ["email_verification_attempts"]
+            if user.email_verification_attempts >= settings.EMAIL_VERIFICATION_MAX_ATTEMPTS:
+                user.email_verification_locked_at = timezone.now()
+                update_fields.append("email_verification_locked_at")
+            user.save(update_fields=update_fields)
+            attempts_left = max(settings.EMAIL_VERIFICATION_MAX_ATTEMPTS - user.email_verification_attempts, 0)
+            if attempts_left == 0:
+                raise serializers.ValidationError("Incorrect code. Verification is now locked.")
+            raise serializers.ValidationError(f"Incorrect code. {attempts_left} attempts remaining.")
+
+        attrs["user"] = user
+        return attrs
+
+
+class ResendVerificationCodeSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        normalized_value = value.strip().lower()
+        try:
+            self.context["user"] = User.objects.get(email__iexact=normalized_value)
+        except User.DoesNotExist as exc:
+            raise serializers.ValidationError("No account was found for this email.") from exc
+        return normalized_value
+
+
+class RejectUserSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=1000)
+
+    def validate_reason(self, value):
+        normalized_value = " ".join(value.split()).strip()
+        if not normalized_value:
+            raise serializers.ValidationError("Rejection reason is required.")
+        return normalized_value
 
 
 class LoginSerializer(TokenObtainPairSerializer):
@@ -399,6 +471,12 @@ class LoginSerializer(TokenObtainPairSerializer):
         self.user = authenticate(**authenticate_kwargs)
         if not self.user:
             self.fail("no_active_account")
+
+        if not settings.BYPASS_USER_APPROVAL:
+            if not self.user.is_email_verified:
+                raise serializers.ValidationError("Please verify your email before logging in.")
+            if not self.user.is_approved:
+                raise serializers.ValidationError("Your account is awaiting admin approval.")
 
         refresh = self.get_token(self.user)
         data = {
@@ -481,25 +559,24 @@ class PatientRegistrationSerializer(serializers.ModelSerializer):
         validated_data["status"] = Patient.Status.TRIAGE
         last_error = None
         patient = None
-        with PATIENT_REGISTRATION_LOCK:
-            for attempt in range(30):
-                try:
-                    with transaction.atomic():
-                        temp_reg_no = f"TMP-{uuid.uuid4().hex[:12].upper()}"
-                        patient = super().create({**validated_data, "reg_no": temp_reg_no})
-                        patient.reg_no = build_patient_reg_no_from_id(patient.id)
-                        patient.save(update_fields=["reg_no"])
-                    break
-                except IntegrityError as exc:
-                    last_error = exc
-                    time.sleep(min(0.02 * (attempt + 1), 0.25))
-                    continue
-                except OperationalError as exc:
-                    last_error = exc
-                    if "locked" not in str(exc).lower():
-                        raise
-                    time.sleep(min(0.05 * (attempt + 1), 0.5))
-                    continue
+        for attempt in range(30):
+            try:
+                with transaction.atomic():
+                    temp_reg_no = f"TMP-{uuid.uuid4().hex[:12].upper()}"
+                    patient = super().create({**validated_data, "reg_no": temp_reg_no})
+                    patient.reg_no = build_patient_reg_no_from_id(patient.id)
+                    patient.save(update_fields=["reg_no"])
+                break
+            except IntegrityError as exc:
+                last_error = exc
+                time.sleep(min(0.02 * (attempt + 1), 0.25))
+                continue
+            except OperationalError as exc:
+                last_error = exc
+                if "locked" not in str(exc).lower():
+                    raise
+                time.sleep(min(0.05 * (attempt + 1), 0.5))
+                continue
 
         if patient is None:
             if last_error is not None:
@@ -1892,7 +1969,11 @@ class DrugBatchSerializer(serializers.ModelSerializer):
 class DrugInventoryCreateSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     camp = serializers.CharField(required=False, allow_blank=True, write_only=True)
-    category = serializers.ChoiceField(choices=DrugInventory.Category.choices)
+    category = serializers.ChoiceField(
+        choices=DrugInventory.Category.choices,
+        required=False,
+        default=DrugInventory.Category.OTHER,
+    )
     drug_name = serializers.CharField()
     amount = serializers.CharField()
     stock_quantity = serializers.IntegerField(min_value=1)
@@ -1908,6 +1989,7 @@ class DrugInventoryCreateSerializer(serializers.Serializer):
         attrs["drug_name"] = attrs["drug_name"].strip()
         attrs["amount"] = attrs["amount"].strip()
         attrs["camp"] = UNIVERSAL_INVENTORY_CAMP
+        attrs["category"] = attrs.get("category") or DrugInventory.Category.OTHER
         if not attrs["drug_name"] or not attrs["amount"]:
             raise serializers.ValidationError("Drug name and amount are required.")
         return attrs

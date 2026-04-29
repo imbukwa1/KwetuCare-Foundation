@@ -118,6 +118,20 @@ export function signup(payload) {
   });
 }
 
+export function verifyEmail(payload) {
+  return apiRequest("/auth/verify-email/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function resendVerificationCode(payload) {
+  return apiRequest("/auth/resend-verification-code/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function login(payload) {
   const data = await apiRequest("/auth/login/", {
     method: "POST",
@@ -226,9 +240,10 @@ export function approveUser(userId) {
   });
 }
 
-export function rejectUser(userId) {
+export function rejectUser(userId, reason) {
   return apiRequest(`/auth/users/${userId}/reject/`, {
     method: "DELETE",
+    body: JSON.stringify({ reason }),
   });
 }
 

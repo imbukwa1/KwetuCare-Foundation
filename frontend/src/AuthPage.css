@@ -116,6 +116,12 @@ body {
   background: var(--maroon-dark);
 }
 
+.btn-maroon:disabled,
+.btn-muted:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .auth-footer {
   margin-top: 0.9rem;
   display: flex;
@@ -211,6 +217,16 @@ body {
 .role-selected {
   margin: 0.45rem 0 0;
   color: #6b3c36;
+  font-size: 0.9rem;
+}
+
+.modal-success {
+  margin: 0;
+  color: #286b3f;
+  background: #e8f7ed;
+  border: 1px solid #add8ba;
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
   font-size: 0.9rem;
 }
 

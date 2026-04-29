@@ -49,4 +49,4 @@ Backend: https://kwetucare-foundation-production.up.railway.app
 Frontend: https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app
 ```
 
-For local frontend development, run the backend on port `8000`; `frontend/package.json` still proxies API requests to `http://127.0.0.1:8000`.
+For local frontend development, run the backend on port `8080`; `frontend/package.json` still proxies API requests to `http://127.0.0.1:8080`.

@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from datetime import timedelta
 import threading
 import time
@@ -64,22 +65,30 @@ from .serializers import (
     PatientRegistrationSerializer,
     PatientListSerializer,
     PatientWorkflowDetailSerializer,
+    RejectUserSerializer,
+    ResendVerificationCodeSerializer,
     SignupSerializer,
     StageTimingAnalyticsSerializer,
     TriageSerializer,
     UserSerializer,
+    VerifyEmailSerializer,
     AdminReportSerializer,
     create_audit_log,
     ensure_consultation_referral_column,
     get_available_inventory_queryset,
-    PatientRegistrationFileLock,
     refresh_inventory_totals,
     safe_refresh_inventory_totals,
     sync_batch_statuses,
 )
+from .auth_emails import (
+    send_admin_signup_notification,
+    send_user_approved_email,
+    send_user_rejected_email,
+    send_user_verification_email,
+    set_email_verification_code,
+)
 
 User = get_user_model()
-PATIENT_REGISTRATION_VIEW_LOCK = threading.Lock()
 
 
 REPORT_PERIODS = {
@@ -291,10 +300,90 @@ class SignupView(generics.CreateAPIView):
     serializer_class = SignupSerializer
     permission_classes = [permissions.AllowAny]
 
+    def create(self, request, *args, **kwargs):
+        last_error = None
+        for attempt in range(12):
+            try:
+                serializer = self.get_serializer(data=request.data)
+                serializer.is_valid(raise_exception=True)
+                user = serializer.save()
+                if not settings.BYPASS_USER_APPROVAL:
+                    code = set_email_verification_code(user)
+                    send_user_verification_email(user, code)
+                return Response(
+                    {
+                        "detail": (
+                            "Signup successful. Check your email for the verification code."
+                            if not settings.BYPASS_USER_APPROVAL
+                            else "Signup successful."
+                        ),
+                        "email": user.email,
+                        "requires_email_verification": not settings.BYPASS_USER_APPROVAL,
+                    },
+                    status=status.HTTP_201_CREATED,
+                )
+            except OperationalError as exc:
+                last_error = exc
+                if "locked" not in str(exc).lower():
+                    raise
+                close_old_connections()
+                time.sleep(min(0.1 * (attempt + 1), 0.75))
+                continue
+        if last_error is not None:
+            raise last_error
+
 
 class LoginView(TokenObtainPairView):
     serializer_class = LoginSerializer
     permission_classes = [permissions.AllowAny]
+
+
+class VerifyEmailView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = VerifyEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data["user"]
+        if not user.is_email_verified:
+            user.is_email_verified = True
+            user.email_verification_code_hash = ""
+            user.email_verification_expires_at = None
+            user.email_verification_attempts = 0
+            user.email_verification_locked_at = None
+            user.save(
+                update_fields=[
+                    "is_email_verified",
+                    "email_verification_code_hash",
+                    "email_verification_expires_at",
+                    "email_verification_attempts",
+                    "email_verification_locked_at",
+                ]
+            )
+            send_admin_signup_notification(user)
+            create_audit_log(
+                user=user,
+                action="user_email_verified",
+                details={"verified_user_id": user.id, "verified_username": user.username},
+            )
+        return Response(
+            {"detail": "Email verified. Your account is now awaiting admin approval."},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ResendVerificationCodeView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = ResendVerificationCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.context["user"]
+        if user.is_email_verified:
+            return Response({"detail": "Email is already verified."}, status=status.HTTP_200_OK)
+        code = set_email_verification_code(user)
+        send_user_verification_email(user, code)
+        return Response({"detail": "A new verification code has been sent."}, status=status.HTTP_200_OK)
 
 
 class MeView(APIView):
@@ -309,16 +398,19 @@ class PendingUsersView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
 
     def get_queryset(self):
-        return User.objects.filter(is_approved=False).order_by("date_joined")
+        return User.objects.filter(is_email_verified=True, is_approved=False, rejected_at__isnull=True).order_by("date_joined")
 
 
 class ApproveUserView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
 
     def post(self, request, user_id):
-        user = generics.get_object_or_404(User, id=user_id)
+        user = generics.get_object_or_404(User, id=user_id, is_email_verified=True, rejected_at__isnull=True)
         user.is_approved = True
-        user.save(update_fields=["is_approved"])
+        user.approved_at = timezone.now()
+        user.approval_rejection_reason = ""
+        user.save(update_fields=["is_approved", "approved_at", "approval_rejection_reason"])
+        send_user_approved_email(user)
         create_audit_log(
             user=request.user,
             action="user_approved",
@@ -331,12 +423,19 @@ class RejectUserView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
 
     def delete(self, request, user_id):
-        user = generics.get_object_or_404(User, id=user_id)
+        serializer = RejectUserSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reason = serializer.validated_data["reason"]
+        user = generics.get_object_or_404(User, id=user_id, is_email_verified=True, rejected_at__isnull=True)
         user_data = UserSerializer(user).data
+        user.approval_rejection_reason = reason
+        user.rejected_at = timezone.now()
+        user.save(update_fields=["approval_rejection_reason", "rejected_at"])
+        send_user_rejected_email(user, reason)
         create_audit_log(
             user=request.user,
             action="user_rejected",
-            details={"rejected_user_id": user.id, "rejected_username": user.username},
+            details={"rejected_user_id": user.id, "rejected_username": user.username, "reason": reason},
         )
         user.delete()
         return Response(user_data, status=status.HTTP_200_OK)
@@ -348,18 +447,16 @@ class PatientRegistrationView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         last_error = None
-        with PATIENT_REGISTRATION_VIEW_LOCK:
-            with PatientRegistrationFileLock():
-                for attempt in range(10):
-                    try:
-                        return super().create(request, *args, **kwargs)
-                    except OperationalError as exc:
-                        last_error = exc
-                        if "locked" not in str(exc).lower():
-                            raise
-                        close_old_connections()
-                        time.sleep(min(0.1 * (attempt + 1), 0.75))
-                        continue
+        for attempt in range(12):
+            try:
+                return super().create(request, *args, **kwargs)
+            except OperationalError as exc:
+                last_error = exc
+                if "locked" not in str(exc).lower():
+                    raise
+                close_old_connections()
+                time.sleep(min(0.1 * (attempt + 1), 0.75))
+                continue
         if last_error is not None:
             raise last_error
 

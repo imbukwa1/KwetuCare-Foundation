@@ -26,14 +26,18 @@ from .views import (
     PatientWorkflowDetailView,
     PendingUsersView,
     RejectUserView,
+    ResendVerificationCodeView,
     SignupView,
     StageQueueView,
     TriageCreateView,
+    VerifyEmailView,
 )
 
 
 urlpatterns = [
     path("auth/signup/", SignupView.as_view(), name="signup"),
+    path("auth/verify-email/", VerifyEmailView.as_view(), name="verify_email"),
+    path("auth/resend-verification-code/", ResendVerificationCodeView.as_view(), name="resend_verification_code"),
     path("auth/login/", LoginView.as_view(), name="login"),
     path("auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/me/", MeView.as_view(), name="me"),

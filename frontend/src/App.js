@@ -150,7 +150,9 @@ function App() {
   if (!user) {
     return <AuthPage onAuthenticated={(nextUser) => {
       setUser(nextUser);
-      navigateTo(getDefaultPathForUser(nextUser), { replace: true });
+      const defaultPath = getDefaultPathForUser(nextUser);
+      const adminActionSearch = window.location.search.includes('pendingUser=') ? window.location.search : '';
+      navigateTo(defaultPath === '/admin' ? `${defaultPath}${adminActionSearch}` : defaultPath, { replace: true });
     }} />;
   }
 

@@ -80,6 +80,7 @@ function PendingUsersPanel({ users, onApprove, onReject }) {
           <thead>
             <tr>
               <th>Username</th>
+              <th>Name</th>
               <th>Email</th>
               <th>Role</th>
               <th>Action</th>
@@ -89,6 +90,7 @@ function PendingUsersPanel({ users, onApprove, onReject }) {
             {users.map((user) => (
               <tr key={user.id}>
                 <td>{user.username}</td>
+                <td>{user.full_name}</td>
                 <td>{user.email}</td>
                 <td>{user.role}</td>
                 <td className="action-row">
@@ -557,6 +559,7 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
   const [visiblePatientsCount, setVisiblePatientsCount] = useState(10);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [reportPeriod, setReportPeriod] = useState("1m");
+  const [handledEmailAction, setHandledEmailAction] = useState(false);
   const hasInitializedSearchRef = useRef(false);
   const hasInitializedPeriodRef = useRef(false);
 
@@ -652,14 +655,39 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
   }, [refresh]);
 
   const handleReject = useCallback(async (userId) => {
+    const reason = window.prompt("Enter the reason for rejecting this account:");
+    if (!reason || !reason.trim()) {
+      setError("Rejection reason is required.");
+      return;
+    }
     try {
-      await rejectUser(userId);
+      await rejectUser(userId, reason.trim());
       setStatusMessage("User rejected successfully.");
       await refresh({ source: "after-reject" });
     } catch (actionError) {
       setError(actionError.message);
     }
   }, [refresh]);
+
+  useEffect(() => {
+    if (handledEmailAction || pendingUsers.length === 0) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const pendingUserId = Number(params.get("pendingUser"));
+    const action = params.get("action");
+    if (!pendingUserId || !["approve", "reject", "review"].includes(action)) return;
+
+    const userExists = pendingUsers.some((user) => user.id === pendingUserId);
+    if (!userExists) return;
+
+    setHandledEmailAction(true);
+    if (action === "approve") {
+      handleApprove(pendingUserId);
+    }
+    if (action === "reject") {
+      handleReject(pendingUserId);
+    }
+  }, [handleApprove, handleReject, handledEmailAction, pendingUsers]);
 
   const handleCreateInventory = useCallback(async () => {
     if (

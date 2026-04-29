@@ -86,3 +86,7 @@ API integration
 Load testing (up to 100 concurrent users)
 
 Each function is validated with pass/fail conditions.
+
+Deployment
+
+Deployment setup notes are in docs/DEPLOYMENT.md.

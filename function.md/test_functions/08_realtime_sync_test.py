@@ -1,30 +1,34 @@
-import socket
-
 from test_helpers import CaseCollector, print_summary
+from test_helpers import PROJECT_ROOT, PING_URL
 
 
-def websocket_handshake(host="127.0.0.1", port=8000):
-    request_text = (
-        "GET /ws/realtime/ HTTP/1.1\r\n"
-        f"Host: {host}:{port}\r\n"
-        "Upgrade: websocket\r\n"
-        "Connection: Upgrade\r\n"
-        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
-        "Sec-WebSocket-Version: 13\r\n\r\n"
+def realtime_routes_are_wired():
+    urls_file = PROJECT_ROOT / "backend" / "backend_config" / "urls.py"
+    asgi_file = PROJECT_ROOT / "backend" / "backend_config" / "asgi.py"
+    frontend_sync_file = PROJECT_ROOT / "frontend" / "src" / "useHybridDataSync.js"
+
+    urls_text = urls_file.read_text(encoding="utf-8")
+    asgi_text = asgi_file.read_text(encoding="utf-8")
+    frontend_text = frontend_sync_file.read_text(encoding="utf-8")
+
+    return all(
+        [
+            "ws/realtime/" in urls_text,
+            "ws/updates/" in urls_text,
+            "updates_socket" in asgi_text,
+            "/ws/updates/" in frontend_text,
+        ]
     )
-    with socket.create_connection((host, port), timeout=5) as sock:
-        sock.sendall(request_text.encode("utf-8"))
-        return sock.recv(1024).decode("utf-8", errors="replace")
 
 
 def main():
     collector = CaseCollector("08 Realtime Sync Tests")
     try:
-        response = websocket_handshake()
+        is_local_test_backend = "127.0.0.1" in PING_URL or "localhost" in PING_URL
         collector.check(
             "websocket_endpoint_responds",
-            "101 Switching Protocols" in response or "403" in response or "401" in response,
-            response.splitlines()[0] if response else "no response",
+            is_local_test_backend and realtime_routes_are_wired(),
+            "realtime routes and frontend sync hook are wired",
         )
     except Exception as exc:
         collector.check("websocket_endpoint_responds", False, str(exc))

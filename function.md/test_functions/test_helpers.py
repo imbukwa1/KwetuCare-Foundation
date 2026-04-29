@@ -9,9 +9,9 @@ from pathlib import Path
 from urllib import error, request
 
 
-PROJECT_ROOT = Path(r"C:\Users\imbuk\kwetucare-foundation")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = PROJECT_ROOT / "backend"
-FRONTEND_ROOT = PROJECT_ROOT
+FRONTEND_ROOT = PROJECT_ROOT / "frontend"
 API_BASE_URL = os.getenv("KCF_API_BASE_URL", "http://127.0.0.1:8010/api")
 PING_URL = os.getenv("KCF_PING_URL", "http://127.0.0.1:8010/ping/")
 DEFAULT_PASSWORD = os.getenv("KCF_TEST_PASSWORD", "Test12345!")

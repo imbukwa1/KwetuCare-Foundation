@@ -118,6 +118,22 @@ SIMPLE_JWT = {
 # Local testing helper: when True, signup auto-approves users and approval checks are bypassed.
 BYPASS_USER_APPROVAL = os.getenv('BYPASS_USER_APPROVAL', 'true').lower() == 'true'
 
+ADMIN_NOTIFICATION_EMAIL = os.getenv('ADMIN_NOTIFICATION_EMAIL', 'kwetucarefoundation@gmail.com')
+EMAIL_VERIFICATION_EXPIRY_MINUTES = int(os.getenv('EMAIL_VERIFICATION_EXPIRY_MINUTES', '10'))
+EMAIL_VERIFICATION_MAX_ATTEMPTS = int(os.getenv('EMAIL_VERIFICATION_MAX_ATTEMPTS', '3'))
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000').rstrip('/')
+
+EMAIL_BACKEND = os.getenv(
+    'EMAIL_BACKEND',
+    'django.core.mail.backends.console.EmailBackend' if DEBUG else 'django.core.mail.backends.smtp.EmailBackend',
+)
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'true').lower() == 'true'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or ADMIN_NOTIFICATION_EMAIL)
+
 DEFAULT_FRONTEND_ORIGINS = [
     'https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app',
 ]
