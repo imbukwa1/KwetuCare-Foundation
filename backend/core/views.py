@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.conf import settings
 from datetime import timedelta
+import smtplib
 import threading
 import time
 from django.db import models
@@ -11,6 +12,7 @@ from django.db.utils import ProgrammingError
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import APIException
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -89,6 +91,7 @@ from .auth_emails import (
 )
 
 User = get_user_model()
+EMAIL_DELIVERY_EXCEPTIONS = (OSError, smtplib.SMTPException)
 
 
 REPORT_PERIODS = {
@@ -96,6 +99,18 @@ REPORT_PERIODS = {
     "3m": ("Last 3 Months", timedelta(days=90)),
     "1y": ("Last 1 Year", timedelta(days=365)),
 }
+
+
+class EmailDeliveryUnavailable(APIException):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_code = "email_delivery_unavailable"
+    default_detail = "Email delivery is temporarily unavailable. Please try again."
+
+
+def raise_email_delivery_error(exc):
+    raise EmailDeliveryUnavailable(
+        "We could not send the email right now. Please try again in a moment."
+    ) from exc
 
 
 def resolve_report_period(period_key):
@@ -304,12 +319,35 @@ class SignupView(generics.CreateAPIView):
         last_error = None
         for attempt in range(12):
             try:
+                email = str(request.data.get("email", "")).strip().lower()
+                if email:
+                    existing_user = User.objects.filter(email__iexact=email).first()
+                    if existing_user and not existing_user.is_email_verified and not existing_user.is_approved:
+                        if not settings.BYPASS_USER_APPROVAL:
+                            code = set_email_verification_code(existing_user)
+                            try:
+                                send_user_verification_email(existing_user, code)
+                            except EMAIL_DELIVERY_EXCEPTIONS as exc:
+                                raise_email_delivery_error(exc)
+                        return Response(
+                            {
+                                "detail": "A fresh verification code has been sent to your email.",
+                                "email": existing_user.email,
+                                "requires_email_verification": not settings.BYPASS_USER_APPROVAL,
+                            },
+                            status=status.HTTP_200_OK,
+                        )
+
                 serializer = self.get_serializer(data=request.data)
                 serializer.is_valid(raise_exception=True)
                 user = serializer.save()
                 if not settings.BYPASS_USER_APPROVAL:
                     code = set_email_verification_code(user)
-                    send_user_verification_email(user, code)
+                    try:
+                        send_user_verification_email(user, code)
+                    except EMAIL_DELIVERY_EXCEPTIONS as exc:
+                        user.delete()
+                        raise_email_delivery_error(exc)
                 return Response(
                     {
                         "detail": (
@@ -346,6 +384,10 @@ class VerifyEmailView(APIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
         if not user.is_email_verified:
+            try:
+                send_admin_signup_notification(user)
+            except EMAIL_DELIVERY_EXCEPTIONS as exc:
+                raise_email_delivery_error(exc)
             user.is_email_verified = True
             user.email_verification_code_hash = ""
             user.email_verification_expires_at = None
@@ -360,7 +402,6 @@ class VerifyEmailView(APIView):
                     "email_verification_locked_at",
                 ]
             )
-            send_admin_signup_notification(user)
             create_audit_log(
                 user=user,
                 action="user_email_verified",
@@ -382,7 +423,10 @@ class ResendVerificationCodeView(APIView):
         if user.is_email_verified:
             return Response({"detail": "Email is already verified."}, status=status.HTTP_200_OK)
         code = set_email_verification_code(user)
-        send_user_verification_email(user, code)
+        try:
+            send_user_verification_email(user, code)
+        except EMAIL_DELIVERY_EXCEPTIONS as exc:
+            raise_email_delivery_error(exc)
         return Response({"detail": "A new verification code has been sent."}, status=status.HTTP_200_OK)
 
 
@@ -410,7 +454,10 @@ class ApproveUserView(APIView):
         user.approved_at = timezone.now()
         user.approval_rejection_reason = ""
         user.save(update_fields=["is_approved", "approved_at", "approval_rejection_reason"])
-        send_user_approved_email(user)
+        try:
+            send_user_approved_email(user)
+        except EMAIL_DELIVERY_EXCEPTIONS as exc:
+            raise_email_delivery_error(exc)
         create_audit_log(
             user=request.user,
             action="user_approved",
@@ -431,7 +478,10 @@ class RejectUserView(APIView):
         user.approval_rejection_reason = reason
         user.rejected_at = timezone.now()
         user.save(update_fields=["approval_rejection_reason", "rejected_at"])
-        send_user_rejected_email(user, reason)
+        try:
+            send_user_rejected_email(user, reason)
+        except EMAIL_DELIVERY_EXCEPTIONS as exc:
+            raise_email_delivery_error(exc)
         create_audit_log(
             user=request.user,
             action="user_rejected",

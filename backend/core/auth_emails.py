@@ -99,9 +99,9 @@ def send_admin_signup_notification(user):
       <tr><td><strong>Timestamp</strong></td><td>{timestamp}</td></tr>
     </table>
     <p>
-      <a href="{approve_url}">Approve ✅</a>
+      <a href="{approve_url}">Approve &#x2705;</a>
       &nbsp;|&nbsp;
-      <a href="{reject_url}">Reject ❌</a>
+      <a href="{reject_url}">Reject &#x274C;</a>
       &nbsp;|&nbsp;
       <a href="{dashboard_url}">Open dashboard</a>
     </p>
