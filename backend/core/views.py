@@ -84,6 +84,7 @@ from .serializers import (
     sync_batch_statuses,
 )
 from .auth_emails import (
+    EmailSendError,
     send_admin_signup_notification,
     send_user_approved_email,
     send_user_rejected_email,
@@ -92,7 +93,7 @@ from .auth_emails import (
 )
 
 User = get_user_model()
-EMAIL_DELIVERY_EXCEPTIONS = (OSError, smtplib.SMTPException)
+EMAIL_DELIVERY_EXCEPTIONS = (EmailSendError, OSError, smtplib.SMTPException)
 logger = logging.getLogger(__name__)
 
 
@@ -390,6 +391,9 @@ class EmailConfigHealthView(APIView):
         return Response(
             {
                 "email_backend": settings.EMAIL_BACKEND,
+                "email_provider": settings.EMAIL_PROVIDER,
+                "resend_api_key_configured": bool(settings.RESEND_API_KEY),
+                "resend_from_email": settings.RESEND_FROM_EMAIL,
                 "email_host": settings.EMAIL_HOST,
                 "email_port": settings.EMAIL_PORT,
                 "email_use_tls": settings.EMAIL_USE_TLS,

@@ -1,12 +1,19 @@
 import hashlib
+import json
 import random
 from datetime import timedelta
 from html import escape
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.core.mail import send_mail
 from django.utils import timezone
+
+
+class EmailSendError(Exception):
+    pass
 
 
 def build_email_verification_code():
@@ -42,6 +49,59 @@ def frontend_url(path="", **query):
     return url
 
 
+def send_email(*, subject, text, recipients, html=None):
+    if settings.EMAIL_PROVIDER == "resend":
+        return send_resend_email(
+            subject=subject,
+            text=text,
+            recipients=recipients,
+            html=html,
+        )
+
+    return send_mail(
+        subject=subject,
+        message=text,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=recipients,
+        fail_silently=False,
+        html_message=html,
+    )
+
+
+def send_resend_email(*, subject, text, recipients, html=None):
+    if not settings.RESEND_API_KEY:
+        raise EmailSendError("RESEND_API_KEY is not configured.")
+
+    payload = {
+        "from": settings.RESEND_FROM_EMAIL,
+        "to": recipients,
+        "subject": subject,
+        "text": text,
+    }
+    if html:
+        payload["html"] = html
+
+    request = Request(
+        settings.RESEND_API_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {settings.RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            "User-Agent": "kwetu-care-foundation/1.0",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=settings.EMAIL_TIMEOUT) as response:
+            return json.loads(response.read().decode("utf-8") or "{}")
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise EmailSendError(f"Resend rejected the email request: {exc.code} {body}") from exc
+    except URLError as exc:
+        raise EmailSendError(f"Could not reach Resend email API: {exc.reason}") from exc
+
+
 def send_user_verification_email(user, code):
     expires = settings.EMAIL_VERIFICATION_EXPIRY_MINUTES
     message = (
@@ -51,12 +111,10 @@ def send_user_verification_email(user, code):
         f"{settings.EMAIL_VERIFICATION_MAX_ATTEMPTS} attempts.\n\n"
         "After verification, an administrator will review your account."
     )
-    send_mail(
+    send_email(
         subject="Verify your Kwetu Care account",
-        message=message,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[user.email],
-        fail_silently=False,
+        text=message,
+        recipients=[user.email],
     )
 
 
@@ -108,13 +166,11 @@ def send_admin_signup_notification(user):
     <p>Rejecting an account requires a reason in the admin dashboard.</p>
     """
 
-    send_mail(
+    send_email(
         subject="New Kwetu Care signup awaiting approval",
-        message=message,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[settings.ADMIN_NOTIFICATION_EMAIL],
-        fail_silently=False,
-        html_message=html_message,
+        text=message,
+        recipients=[settings.ADMIN_NOTIFICATION_EMAIL],
+        html=html_message,
     )
 
 
@@ -126,13 +182,11 @@ def send_user_approved_email(user):
         "Welcome to Kwetu Care. Your account has been approved and you can now log in.\n\n"
         f"Login: {login_url}"
     )
-    send_mail(
+    send_email(
         subject="Your Kwetu Care account has been approved",
-        message=message,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[user.email],
-        fail_silently=False,
-        html_message=(
+        text=message,
+        recipients=[user.email],
+        html=(
             f"<p>Hello {escape(display_name)},</p>"
             "<p>Welcome to Kwetu Care. Your account has been approved and you can now log in.</p>"
             f'<p><a href="{login_url}">Login to Kwetu Care</a></p>'
@@ -141,14 +195,12 @@ def send_user_approved_email(user):
 
 
 def send_user_rejected_email(user, reason):
-    send_mail(
+    send_email(
         subject="Kwetu Care account request update",
-        message=(
+        text=(
             f"Hello {user.get_full_name() or user.username},\n\n"
             "Your Kwetu Care account request was not approved.\n\n"
             f"Reason: {reason}"
         ),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[user.email],
-        fail_silently=False,
+        recipients=[user.email],
     )

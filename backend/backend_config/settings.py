@@ -123,6 +123,11 @@ EMAIL_VERIFICATION_EXPIRY_MINUTES = int(os.getenv('EMAIL_VERIFICATION_EXPIRY_MIN
 EMAIL_VERIFICATION_MAX_ATTEMPTS = int(os.getenv('EMAIL_VERIFICATION_MAX_ATTEMPTS', '3'))
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000').rstrip('/')
 
+EMAIL_PROVIDER = os.getenv('EMAIL_PROVIDER', 'resend').strip().lower()
+RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
+RESEND_API_URL = os.getenv('RESEND_API_URL', 'https://api.resend.com/emails')
+RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', os.getenv('DEFAULT_FROM_EMAIL', 'Kwetu Care <onboarding@resend.dev>'))
+
 EMAIL_BACKEND = os.getenv(
     'EMAIL_BACKEND',
     'core.email_backend.IPv4GmailSMTPEmailBackend',

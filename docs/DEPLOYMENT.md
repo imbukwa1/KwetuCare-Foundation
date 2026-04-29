@@ -42,19 +42,14 @@ CSRF_TRUSTED_ORIGINS=https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.
 FRONTEND_URL=https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app
 BYPASS_USER_APPROVAL=false
 ADMIN_NOTIFICATION_EMAIL=kwetucarefoundation@gmail.com
-EMAIL_BACKEND=core.email_backend.IPv4GmailSMTPEmailBackend
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USE_TLS=true
-EMAIL_HOST_USER=kwetucarefoundation@gmail.com
-EMAIL_HOST_PASSWORD=<Gmail App Password>
-DEFAULT_FROM_EMAIL=kwetucarefoundation@gmail.com
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=<Resend API key>
+RESEND_FROM_EMAIL=Kwetu Care <onboarding@resend.dev>
 EMAIL_VERIFICATION_EXPIRY_MINUTES=10
 EMAIL_VERIFICATION_MAX_ATTEMPTS=3
 ```
 
-The Gmail password must be a Gmail App Password for `kwetucarefoundation@gmail.com`, not the normal mailbox password.
-The custom email backend still uses Django's SMTP email backend, but forces IPv4 so Railway does not fail when `smtp.gmail.com` resolves to IPv6 first.
+Railway blocks outbound SMTP on Free, Trial, and Hobby plans, so production email should use Resend's HTTPS API. For quick testing, Resend allows `onboarding@resend.dev`, but production should use a verified sending domain and set `RESEND_FROM_EMAIL` to that sender.
 
 Current public URLs:
 
