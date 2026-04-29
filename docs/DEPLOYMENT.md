@@ -39,8 +39,21 @@ DJANGO_SECRET_KEY=<a long random secret>
 DJANGO_ALLOWED_HOSTS=kwetucare-foundation-production.up.railway.app
 CORS_ALLOWED_ORIGINS=https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app
 CSRF_TRUSTED_ORIGINS=https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app
+FRONTEND_URL=https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app
 BYPASS_USER_APPROVAL=false
+ADMIN_NOTIFICATION_EMAIL=kwetucarefoundation@gmail.com
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=true
+EMAIL_HOST_USER=kwetucarefoundation@gmail.com
+EMAIL_HOST_PASSWORD=<Gmail App Password>
+DEFAULT_FROM_EMAIL=kwetucarefoundation@gmail.com
+EMAIL_VERIFICATION_EXPIRY_MINUTES=10
+EMAIL_VERIFICATION_MAX_ATTEMPTS=3
 ```
+
+The Gmail password must be a Gmail App Password for `kwetucarefoundation@gmail.com`, not the normal mailbox password.
 
 Current public URLs:
 
