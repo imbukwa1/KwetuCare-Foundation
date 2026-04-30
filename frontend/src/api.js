@@ -118,20 +118,6 @@ export function signup(payload) {
   });
 }
 
-export function verifyEmail(payload) {
-  return apiRequest("/auth/verify-email/", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export function resendVerificationCode(payload) {
-  return apiRequest("/auth/resend-verification-code/", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
 export async function login(payload) {
   const data = await apiRequest("/auth/login/", {
     method: "POST",
@@ -230,20 +216,13 @@ export function submitDispensing(payload) {
   });
 }
 
-export function fetchPendingUsers() {
-  return apiRequest("/auth/pending-users/");
+export function fetchStaffUsers() {
+  return apiRequest("/auth/staff-users/");
 }
 
-export function approveUser(userId) {
-  return apiRequest(`/auth/users/${userId}/approve/`, {
+export function lockStaffUser(userId) {
+  return apiRequest(`/auth/staff-users/${userId}/lock/`, {
     method: "POST",
-  });
-}
-
-export function rejectUser(userId, reason) {
-  return apiRequest(`/auth/users/${userId}/reject/`, {
-    method: "DELETE",
-    body: JSON.stringify({ reason }),
   });
 }
 

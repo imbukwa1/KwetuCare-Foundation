@@ -41,10 +41,6 @@ function navigateTo(path, { replace = false } = {}) {
 }
 
 function getDefaultPathForUser(user) {
-  if (!user?.is_approved) {
-    return '/pending-approval';
-  }
-
   return ROLE_PATHS[user.role] || '/';
 }
 
@@ -154,10 +150,6 @@ function App() {
       const adminActionSearch = window.location.search.includes('pendingUser=') ? window.location.search : '';
       navigateTo(defaultPath === '/admin' ? `${defaultPath}${adminActionSearch}` : defaultPath, { replace: true });
     }} />;
-  }
-
-  if (!user.is_approved) {
-    return <PendingApprovalView user={user} onLogout={handleLogout} />;
   }
 
   return renderDashboard(user, handleLogout);

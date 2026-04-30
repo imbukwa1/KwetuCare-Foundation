@@ -100,6 +100,11 @@ body {
   background: var(--maroon-dark);
 }
 
+.btn-unavailable:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .top-controls {
   margin: 0.8rem 0;
 }
@@ -239,6 +244,27 @@ body {
 
 .admin-error {
   color: #8b1e2f;
+}
+
+.staff-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.22rem 0.58rem;
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+
+.staff-status-active {
+  background: #e6f4ea;
+  color: #1f6b3d;
+  border: 1px solid #a7d7b4;
+}
+
+.staff-status-locked {
+  background: #fbe0e4;
+  color: #8b1e2f;
+  border: 1px solid #efb7c0;
 }
 
 .action-row {

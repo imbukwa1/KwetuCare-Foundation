@@ -326,8 +326,8 @@ class SignupSerializer(serializers.Serializer):
                             last_name=name_parts[1] if len(name_parts) > 1 else "",
                             **validated_data,
                         )
-                        user.is_approved = settings.BYPASS_USER_APPROVAL
-                        user.is_email_verified = settings.BYPASS_USER_APPROVAL
+                        user.is_approved = True
+                        user.is_email_verified = True
                         user.set_password(password)
                         user.save()
                         return user
@@ -351,22 +351,24 @@ class SignupSerializer(serializers.Serializer):
 
 class UserSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
-    is_approved = serializers.SerializerMethodField()
-    is_email_verified = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ("id", "username", "full_name", "email", "role", "is_email_verified", "is_approved")
+        fields = (
+            "id",
+            "username",
+            "full_name",
+            "email",
+            "role",
+            "is_email_verified",
+            "is_approved",
+            "is_active",
+            "date_joined",
+        )
 
     def get_full_name(self, obj):
         full_name = obj.get_full_name().strip()
         return full_name or obj.username
-
-    def get_is_approved(self, obj):
-        return True if settings.BYPASS_USER_APPROVAL else obj.is_approved
-
-    def get_is_email_verified(self, obj):
-        return True if settings.BYPASS_USER_APPROVAL else obj.is_email_verified
 
 
 class VerifyEmailSerializer(serializers.Serializer):
@@ -472,11 +474,11 @@ class LoginSerializer(TokenObtainPairSerializer):
         if not self.user:
             self.fail("no_active_account")
 
-        if not settings.BYPASS_USER_APPROVAL:
-            if not self.user.is_email_verified:
-                raise serializers.ValidationError("Please verify your email before logging in.")
-            if not self.user.is_approved:
-                raise serializers.ValidationError("Your account is awaiting admin approval.")
+        if not self.user.is_approved or not self.user.is_email_verified:
+            self.user.is_approved = True
+            self.user.is_email_verified = True
+            self.user.approved_at = self.user.approved_at or timezone.now()
+            self.user.save(update_fields=["is_approved", "is_email_verified", "approved_at"])
 
         refresh = self.get_token(self.user)
         data = {

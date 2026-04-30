@@ -40,16 +40,7 @@ DJANGO_ALLOWED_HOSTS=kwetucare-foundation-production.up.railway.app
 CORS_ALLOWED_ORIGINS=https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app
 CSRF_TRUSTED_ORIGINS=https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app
 FRONTEND_URL=https://kwetu-care-foundation-i6vf7j1wj-imbukwa1s-projects.vercel.app
-BYPASS_USER_APPROVAL=false
-ADMIN_NOTIFICATION_EMAIL=kwetucarefoundation@gmail.com
-EMAIL_PROVIDER=resend
-RESEND_API_KEY=<Resend API key>
-RESEND_FROM_EMAIL=Kwetu Care <onboarding@resend.dev>
-EMAIL_VERIFICATION_EXPIRY_MINUTES=10
-EMAIL_VERIFICATION_MAX_ATTEMPTS=3
 ```
-
-Railway blocks outbound SMTP on Free, Trial, and Hobby plans, so production email should use Resend's HTTPS API. For quick testing, Resend allows `onboarding@resend.dev`, but production should use a verified sending domain and set `RESEND_FROM_EMAIL` to that sender.
 
 Current public URLs:
 

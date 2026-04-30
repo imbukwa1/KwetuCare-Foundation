@@ -30,6 +30,8 @@ from .views import (
     ResendVerificationCodeView,
     SignupView,
     StageQueueView,
+    StaffUsersView,
+    LockStaffUserView,
     TriageCreateView,
     VerifyEmailView,
 )
@@ -44,6 +46,8 @@ urlpatterns = [
     path("auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/me/", MeView.as_view(), name="me"),
     path("auth/pending-users/", PendingUsersView.as_view(), name="pending_users"),
+    path("auth/staff-users/", StaffUsersView.as_view(), name="staff_users"),
+    path("auth/staff-users/<int:user_id>/lock/", LockStaffUserView.as_view(), name="lock_staff_user"),
     path("auth/users/<int:user_id>/approve/", ApproveUserView.as_view(), name="approve_user"),
     path("auth/users/<int:user_id>/reject/", RejectUserView.as_view(), name="reject_user"),
     path("admin/patients/", AdminPatientListView.as_view(), name="admin_patient_list"),

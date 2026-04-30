@@ -2,14 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import logo from "./kcf logo.jpeg";
 import "./AdminDashboardPage.css";
 import {
-  approveUser,
   createInventory,
   downloadReport,
   fetchAdminPatients,
   fetchInventory,
-  fetchPendingUsers,
   fetchReportSummary,
-  rejectUser,
+  fetchStaffUsers,
+  lockStaffUser,
   restockInventoryItem,
 } from "./api";
 import useHybridDataSync from "./useHybridDataSync";
@@ -69,12 +68,12 @@ function SummaryCards({ summary }) {
   );
 }
 
-function PendingUsersPanel({ users, onApprove, onReject }) {
+function StaffPanel({ users, onLock }) {
   return (
     <section className="panel">
-      <div className="panel-header"><h2>Pending User Approvals</h2></div>
+      <div className="panel-header"><h2>Staff</h2></div>
       {users.length === 0 ? (
-        <p className="admin-status-box">No pending users right now.</p>
+        <p className="admin-status-box">No staff accounts yet.</p>
       ) : (
         <table className="data-table">
           <thead>
@@ -83,6 +82,7 @@ function PendingUsersPanel({ users, onApprove, onReject }) {
               <th>Name</th>
               <th>Email</th>
               <th>Role</th>
+              <th>Status</th>
               <th>Action</th>
             </tr>
           </thead>
@@ -93,9 +93,19 @@ function PendingUsersPanel({ users, onApprove, onReject }) {
                 <td>{user.full_name}</td>
                 <td>{user.email}</td>
                 <td>{user.role}</td>
+                <td>
+                  <span className={`staff-status ${user.is_active ? "staff-status-active" : "staff-status-locked"}`}>
+                    {user.is_active ? "Active" : "Locked"}
+                  </span>
+                </td>
                 <td className="action-row">
-                  <button className="btn-given" onClick={() => onApprove(user.id)}>Approve</button>
-                  <button className="btn-unavailable" onClick={() => onReject(user.id)}>Reject</button>
+                  <button
+                    className="btn-unavailable"
+                    disabled={!user.is_active}
+                    onClick={() => onLock(user.id)}
+                  >
+                    Remove
+                  </button>
                 </td>
               </tr>
             ))}
@@ -525,7 +535,7 @@ function InventoryPanel({ inventory, form, setForm, onCreate, onOpenRestock }) {
 }
 
 export default function AdminDashboardPage({ currentUser, onLogout }) {
-  const [pendingUsers, setPendingUsers] = useState([]);
+  const [staffUsers, setStaffUsers] = useState([]);
   const [summary, setSummary] = useState({
     period_label: "Last 1 Month",
     patients_per_camp: [],
@@ -559,7 +569,6 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
   const [visiblePatientsCount, setVisiblePatientsCount] = useState(10);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [reportPeriod, setReportPeriod] = useState("1m");
-  const [handledEmailAction, setHandledEmailAction] = useState(false);
   const hasInitializedSearchRef = useRef(false);
   const hasInitializedPeriodRef = useRef(false);
 
@@ -576,15 +585,15 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
       if (showLoading) {
         setLoading(true);
       }
-      const [pending, reportSummary, patientList, inventoryList] = await Promise.all([
-        fetchPendingUsers(),
+      const [staff, reportSummary, patientList, inventoryList] = await Promise.all([
+        fetchStaffUsers(),
         fetchReportSummary(reportPeriod),
         fetchAdminPatients(debouncedSearch ? `?search=${encodeURIComponent(debouncedSearch)}` : ""),
         fetchInventory(),
       ]);
 
       return {
-        pending,
+        staff,
         reportSummary,
         patientList,
         inventoryList,
@@ -596,7 +605,7 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
   const { lastUpdated, refresh } = useHybridDataSync({
     fetcher: loadDashboard,
     onData: (data, { showLoading }) => {
-      setPendingUsers(data.pending);
+      setStaffUsers(data.staff);
       setSummary(data.reportSummary);
       setPatients(data.patientList);
       setInventory(data.inventoryList);
@@ -644,50 +653,17 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
     refresh({ source: "report-period" }).catch(() => {});
   }, [reportPeriod, refresh]);
 
-  const handleApprove = useCallback(async (userId) => {
+  const handleLockStaff = useCallback(async (userId) => {
+    const confirmed = window.confirm("Remove this staff member and lock their login access?");
+    if (!confirmed) return;
     try {
-      await approveUser(userId);
-      setStatusMessage("User approved successfully.");
-      await refresh({ source: "after-approve" });
+      await lockStaffUser(userId);
+      setStatusMessage("Staff member removed and locked out.");
+      await refresh({ source: "after-lock-staff" });
     } catch (actionError) {
       setError(actionError.message);
     }
   }, [refresh]);
-
-  const handleReject = useCallback(async (userId) => {
-    const reason = window.prompt("Enter the reason for rejecting this account:");
-    if (!reason || !reason.trim()) {
-      setError("Rejection reason is required.");
-      return;
-    }
-    try {
-      await rejectUser(userId, reason.trim());
-      setStatusMessage("User rejected successfully.");
-      await refresh({ source: "after-reject" });
-    } catch (actionError) {
-      setError(actionError.message);
-    }
-  }, [refresh]);
-
-  useEffect(() => {
-    if (handledEmailAction || pendingUsers.length === 0) return;
-
-    const params = new URLSearchParams(window.location.search);
-    const pendingUserId = Number(params.get("pendingUser"));
-    const action = params.get("action");
-    if (!pendingUserId || !["approve", "reject", "review"].includes(action)) return;
-
-    const userExists = pendingUsers.some((user) => user.id === pendingUserId);
-    if (!userExists) return;
-
-    setHandledEmailAction(true);
-    if (action === "approve") {
-      handleApprove(pendingUserId);
-    }
-    if (action === "reject") {
-      handleReject(pendingUserId);
-    }
-  }, [handleApprove, handleReject, handledEmailAction, pendingUsers]);
 
   const handleCreateInventory = useCallback(async () => {
     if (
@@ -761,7 +737,7 @@ export default function AdminDashboardPage({ currentUser, onLogout }) {
         <p className="admin-status-box">Reporting period: {summary.period_label}</p>
         <SummaryCards summary={summary} />
         <OutcomePanel summary={summary.outcome_summary || {}} referralCases={summary.referral_cases} />
-        <PendingUsersPanel users={pendingUsers} onApprove={handleApprove} onReject={handleReject} />
+        <StaffPanel users={staffUsers} onLock={handleLockStaff} />
         <PatientsByCamp items={summary.patients_per_camp} />
         <DrugsByCamp items={summary.drugs_issued_per_camp} />
         <DrugUsagePanel items={summary.drug_usage_by_name || []} />

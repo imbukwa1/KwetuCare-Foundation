@@ -330,41 +330,14 @@ class SignupView(generics.CreateAPIView):
         last_error = None
         for attempt in range(12):
             try:
-                email = str(request.data.get("email", "")).strip().lower()
-                if email:
-                    existing_user = User.objects.filter(email__iexact=email).first()
-                    if existing_user and not existing_user.is_email_verified and not existing_user.is_approved:
-                        if not settings.BYPASS_USER_APPROVAL:
-                            code = set_email_verification_code(existing_user)
-                            deliver_auth_email(send_user_verification_email, existing_user, code)
-                        return Response(
-                            {
-                                "detail": "A fresh verification code has been sent to your email.",
-                                "email": existing_user.email,
-                                "requires_email_verification": not settings.BYPASS_USER_APPROVAL,
-                            },
-                            status=status.HTTP_200_OK,
-                        )
-
                 serializer = self.get_serializer(data=request.data)
                 serializer.is_valid(raise_exception=True)
                 user = serializer.save()
-                if not settings.BYPASS_USER_APPROVAL:
-                    code = set_email_verification_code(user)
-                    try:
-                        deliver_auth_email(send_user_verification_email, user, code)
-                    except EmailDeliveryUnavailable:
-                        user.delete()
-                        raise
                 return Response(
                     {
-                        "detail": (
-                            "Signup successful. Check your email for the verification code."
-                            if not settings.BYPASS_USER_APPROVAL
-                            else "Signup successful."
-                        ),
+                        "detail": "Signup successful. You can now log in.",
                         "email": user.email,
-                        "requires_email_verification": not settings.BYPASS_USER_APPROVAL,
+                        "requires_email_verification": False,
                     },
                     status=status.HTTP_201_CREATED,
                 )
@@ -470,6 +443,34 @@ class PendingUsersView(generics.ListAPIView):
 
     def get_queryset(self):
         return User.objects.filter(is_email_verified=True, is_approved=False, rejected_at__isnull=True).order_by("date_joined")
+
+
+class StaffUsersView(generics.ListAPIView):
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
+
+    def get_queryset(self):
+        return User.objects.all().order_by("-is_active", "role", "username")
+
+
+class LockStaffUserView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
+
+    def post(self, request, user_id):
+        user = generics.get_object_or_404(User, id=user_id)
+        if user.id == request.user.id:
+            return Response(
+                {"detail": "You cannot remove your own admin account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+        create_audit_log(
+            user=request.user,
+            action="staff_locked",
+            details={"locked_user_id": user.id, "locked_username": user.username},
+        )
+        return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
 
 
 class ApproveUserView(APIView):
