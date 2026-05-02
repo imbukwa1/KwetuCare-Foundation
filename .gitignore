@@ -30,6 +30,7 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+*.log
 
 # python cache
 __pycache__/
